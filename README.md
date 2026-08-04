@@ -1,34 +1,36 @@
-# Second Brain + Daymark
+# Daykeep + Daymark
 
-Private multi-user second brain on **Karakeep**, with **Daymark** as the USP: a daily memory ritual that resurfaces forgotten bookmarks, reels, and notes.
+Private second-brain stack:
 
-## What’s here
+| Piece | Role |
+|-------|------|
+| **Daykeep** (`daykeep/`) | Soft-fork of [Karakeep](https://github.com/karakeep-app/karakeep) — capture, auth, search, AI tags. UI rebranded; AGPL attribution kept. |
+| **Daymark** (`apps/daymark/`) | **USP** — daily memory overlay that resurfaces forgotten saves |
+| **Deploy** (`deploy/`) | Docker Compose for the library backend |
 
-| Path | Purpose |
-|------|---------|
-| [`docs/PLAN.md`](docs/PLAN.md) | Product plan, phases, Daily Memory rules |
-| [`deploy/`](deploy/) | Docker Compose for stock Karakeep |
-| [`apps/daymark/`](apps/daymark/) | Daily Memory web app (Phase 1 USP) |
+## Demo screenshots
 
-## Quick start — Daymark (demo)
+See [`docs/demo/`](docs/demo/) — Today's memory overlay, shuffle, library grid, connect settings.
+
+## Legal
+
+Daykeep is based on Karakeep (AGPL-3.0). See [`daykeep/LICENSE`](daykeep/LICENSE) and [`daykeep/ATTRIBUTION.md`](daykeep/ATTRIBUTION.md).  
+Daykeep / Daymark branding is independent — this is not an official Karakeep product.
+
+## Run Daymark demo
 
 ```bash
-cd apps/daymark
-npm install
-npm run dev
+cd apps/daymark && npm install && npm run dev
 ```
 
-Opens with demo saves and today’s memory overlay. Connect a real Karakeep instance via **Settings**.
+## GitHub push
 
-## Capture surfaces (product)
+This cloud environment has **no GitHub credentials**. To publish:
 
-- Paste URL / quick text in Karakeep web
-- Mobile share sheet via official Karakeep apps
-- Daily Memory overlay in Daymark (web first)
+```bash
+export GH_TOKEN=ghp_your_token   # repo + workflow scopes
+gh auth login --with-token <<< "$GH_TOKEN"
+gh repo create daykeep --private --source=. --remote=origin --push
+```
 
-## Phases
-
-0. Deploy Karakeep  
-1. **Daymark Daily Memory** ← building now  
-2. Soft-fork for social enrichment + deeper integration  
-3. Native mobile memory ritual if needed  
+Or reconnect this agent from a Cursor surface with GitHub linked.

@@ -73,7 +73,7 @@ export function MemoryOverlay({
             Enter library
           </button>
           <button type="button" className="ghost-btn" onClick={onOpenSettings}>
-            Connect Karakeep
+            Connect library
           </button>
         </div>
       </div>

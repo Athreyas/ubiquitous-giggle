@@ -21,8 +21,8 @@ export function SettingsPanel({ settings, onClose, onSave }: Props) {
       >
         <h2 id="settings-title">Connect your library</h2>
         <p>
-          Point Daymark at your Karakeep instance. Generate an API key under Settings → API Keys.
-          Demo mode works without a server.
+          Point Daymark at your Daykeep instance (Karakeep-compatible API). Generate an API key
+          under Settings → API Keys. Demo mode works without a server.
         </p>
 
         <label className="check-row">
@@ -35,11 +35,11 @@ export function SettingsPanel({ settings, onClose, onSave }: Props) {
         </label>
 
         <div className="field">
-          <label htmlFor="baseUrl">Karakeep URL</label>
+          <label htmlFor="baseUrl">Daykeep URL</label>
           <input
             id="baseUrl"
             type="url"
-            placeholder="https://karakeep.example.com"
+            placeholder="https://daykeep.example.com"
             value={draft.baseUrl}
             disabled={draft.useDemo}
             onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
@@ -51,7 +51,7 @@ export function SettingsPanel({ settings, onClose, onSave }: Props) {
           <input
             id="apiKey"
             type="password"
-            placeholder="Bearer token from Karakeep"
+            placeholder="Bearer token from Daykeep"
             value={draft.apiKey}
             disabled={draft.useDemo}
             autoComplete="off"
