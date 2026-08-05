@@ -16,4 +16,8 @@ set -a
 set +a
 export NO_COLOR=false
 
-exec pnpm workers
+# Use the non-watch entrypoint (start:prod = `tsx index.ts`). The default
+# `pnpm workers` uses `tsx watch`, whose reload/teardown intermittently trips a
+# better-sqlite3 native cleanup-hook assertion on Node 24 during startup. The
+# non-watch process starts reliably; restart this terminal to pick up changes.
+exec pnpm --filter @karakeep/workers run start:prod
