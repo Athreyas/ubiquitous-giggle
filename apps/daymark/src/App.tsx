@@ -138,6 +138,7 @@ export default function App() {
                 loading={loading}
                 error={error}
                 onOpen={openSpotlight}
+                onOpenCard={openDetail}
                 onDismiss={handleDismiss}
                 onShuffle={() => setShuffleSalt((s) => s + 1)}
               />

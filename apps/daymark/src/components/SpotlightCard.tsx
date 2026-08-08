@@ -24,12 +24,16 @@ export function SpotlightCard({ item, index, onOpen, onDismiss }: Props) {
       style={{ x, rotate, opacity }}
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}
-      dragElastic={0.5}
+      dragElastic={0.85}
+      whileDrag={{ scale: 1.01, cursor: 'grabbing' }}
       onDragEnd={(_, info) => {
-        if (Math.abs(info.offset.x) > 150) onDismiss(item)
+        if (Math.abs(info.offset.x) > 110 || Math.abs(info.velocity.x) > 500) {
+          onDismiss(item)
+        }
       }}
       initial={{ opacity: 0, y: 30, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.85, filter: 'blur(4px)', transition: { duration: 0.24 } }}
       transition={{ duration: 0.6, delay: index * 0.08, ease: [0.22, 1, 0.36, 1] }}
     >
       {item.thumbnailUrl ? (

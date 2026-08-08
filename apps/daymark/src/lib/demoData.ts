@@ -12,7 +12,7 @@ export const DEMO_ITEMS: MemoryItem[] = [
     note: 'Read before the design sprint',
     tags: ['creativity', 'health', 'research'],
     thumbnailUrl:
-      'https://images.unsplash.com/photo-1511295742362-92cda5412afb?w=1200&q=80',
+      'https://images.unsplash.com/photo-1444703686981-a3abbc4d4fe3?w=1200&q=80',
     platform: 'article',
     createdAt: daysAgo(45),
   },
@@ -38,7 +38,7 @@ export const DEMO_ITEMS: MemoryItem[] = [
       'Twelve-minute talk on spacing rhythm, soft shadows, and why one accent color beats a rainbow of badges.',
     tags: ['design', 'css', 'ui'],
     thumbnailUrl:
-      'https://images.unsplash.com/photo-1523437113733-ab79c9694d0e?w=1200&q=80',
+      'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=1200&q=80',
     platform: 'youtube',
     createdAt: daysAgo(18),
   },
@@ -128,7 +128,7 @@ export const DEMO_ITEMS: MemoryItem[] = [
       'Larch-clad rifugio with a wall of glass over the valley. Bookmarked for the someday-trip list — reachable by cable car, open in shoulder season.',
     tags: ['travel', 'places', 'mountains'],
     thumbnailUrl:
-      'https://images.unsplash.com/photo-1506905925346-21bbda4d32df4?w=1200&q=80',
+      'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200&q=80',
     platform: 'instagram',
     createdAt: daysAgo(51),
   },

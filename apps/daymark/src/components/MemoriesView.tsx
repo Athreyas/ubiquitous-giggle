@@ -11,6 +11,7 @@ interface Props {
   loading: boolean
   error?: string | null
   onOpen: (item: MemoryItem) => void
+  onOpenCard: (item: MemoryItem) => void
   onDismiss: (item: MemoryItem) => void
   onShuffle: () => void
 }
@@ -22,6 +23,7 @@ export function MemoriesView({
   loading,
   error,
   onOpen,
+  onOpenCard,
   onDismiss,
   onShuffle,
 }: Props) {
@@ -89,7 +91,7 @@ export function MemoriesView({
               </div>
               <motion.div className="card-grid" layout>
                 {feed.map((item, i) => (
-                  <MemoryCard key={item.id} item={item} index={i} onOpen={onOpen} />
+                  <MemoryCard key={item.id} item={item} index={i} onOpen={onOpenCard} />
                 ))}
               </motion.div>
             </section>
