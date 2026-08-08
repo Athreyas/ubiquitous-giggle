@@ -1,4 +1,12 @@
+import type { ComponentType, SVGProps } from 'react'
 import type { Platform } from '../types'
+import {
+  GlyphCamera,
+  GlyphDoc,
+  GlyphMusic,
+  GlyphNote,
+  GlyphPlay,
+} from '../components/Icons'
 
 export function detectPlatform(url?: string, type?: string): Platform {
   if (type === 'text' || !url) return 'note'
@@ -27,5 +35,37 @@ export function platformLabel(platform: Platform): string {
       return 'Note'
     default:
       return 'Saved'
+  }
+}
+
+export interface PlatformMeta {
+  label: string
+  /** Background for the badge dot */
+  swatch: string
+  glyph: ComponentType<SVGProps<SVGSVGElement>>
+}
+
+export function platformMeta(platform: Platform): PlatformMeta {
+  switch (platform) {
+    case 'youtube':
+      return { label: 'YouTube', swatch: '#ff4e45', glyph: GlyphPlay }
+    case 'instagram':
+      return {
+        label: 'Instagram',
+        swatch: 'linear-gradient(135deg,#f9a03c,#dd2a7b 55%,#8134af)',
+        glyph: GlyphCamera,
+      }
+    case 'tiktok':
+      return {
+        label: 'TikTok',
+        swatch: 'linear-gradient(135deg,#25f4ee,#000 50%,#fe2c55)',
+        glyph: GlyphMusic,
+      }
+    case 'article':
+      return { label: 'Article', swatch: 'linear-gradient(135deg,#8b6dff,#5b46c9)', glyph: GlyphDoc }
+    case 'note':
+      return { label: 'Note', swatch: 'linear-gradient(135deg,#ffcf7a,#e0a24a)', glyph: GlyphNote }
+    default:
+      return { label: 'Saved', swatch: 'linear-gradient(135deg,#b6b5c4,#7d7c90)', glyph: GlyphDoc }
   }
 }

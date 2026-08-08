@@ -105,6 +105,70 @@ export const DEMO_ITEMS: MemoryItem[] = [
     platform: 'article',
     createdAt: daysAgo(8),
   },
+  {
+    id: 'demo-9',
+    type: 'link',
+    title: 'Weeknight miso-butter pasta',
+    url: 'https://www.youtube.com/watch?v=demorecipe',
+    summary:
+      'Ten-minute pasta: brown butter, a spoon of white miso, black pepper, and a fistful of chives. The kind of thing you meant to cook and forgot you saved.',
+    note: 'Try with the leftover parmesan rind',
+    tags: ['cooking', 'recipe', 'food'],
+    thumbnailUrl:
+      'https://images.unsplash.com/photo-1473093295043-cdd812d0e601?w=1200&q=80',
+    platform: 'youtube',
+    createdAt: daysAgo(27),
+  },
+  {
+    id: 'demo-10',
+    type: 'link',
+    title: 'A cabin above the Dolomites',
+    url: 'https://www.instagram.com/p/demotravel',
+    summary:
+      'Larch-clad rifugio with a wall of glass over the valley. Bookmarked for the someday-trip list — reachable by cable car, open in shoulder season.',
+    tags: ['travel', 'places', 'mountains'],
+    thumbnailUrl:
+      'https://images.unsplash.com/photo-1506905925346-21bbda4d32df4?w=1200&q=80',
+    platform: 'instagram',
+    createdAt: daysAgo(51),
+  },
+  {
+    id: 'demo-11',
+    type: 'link',
+    title: 'No-knead overnight focaccia',
+    url: 'https://example.com/overnight-focaccia',
+    summary:
+      'Mix at night, dimple and bake in the morning. Olive oil, flaky salt, and whatever herbs are wilting in the fridge. Saved during last winter’s baking phase.',
+    tags: ['cooking', 'recipe', 'baking'],
+    thumbnailUrl:
+      'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=1200&q=80',
+    platform: 'article',
+    createdAt: daysAgo(74),
+  },
+  {
+    id: 'demo-12',
+    type: 'text',
+    title: 'Idea: a weekly “memory lane” recap',
+    summary:
+      'What if Sunday morning surfaced a small reel of everything you saved that week — a gentle recap instead of a firehose? Could become the heart of Daymark.',
+    note: 'Product idea — revisit',
+    tags: ['idea', 'product', 'daymark'],
+    platform: 'note',
+    createdAt: daysAgo(16),
+  },
+  {
+    id: 'demo-13',
+    type: 'link',
+    title: 'Warm brutalist interiors',
+    url: 'https://www.instagram.com/p/demointerior',
+    summary:
+      'Raw concrete softened with oak, linen and low amber light. Mood reference for the someday studio — save the palette, not just the pretty picture.',
+    tags: ['design', 'interior', 'mood'],
+    thumbnailUrl:
+      'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=1200&q=80',
+    platform: 'instagram',
+    createdAt: daysAgo(39),
+  },
 ]
 
 function daysAgo(n: number): string {
