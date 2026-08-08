@@ -7,6 +7,7 @@ import {
   parseInstagram,
   parseTikTok,
 } from './parsers'
+import { SAMPLES, SAMPLE_FILENAMES } from './sampleData'
 
 /* --------------------------------------------------------- fixtures */
 
@@ -188,6 +189,24 @@ describe('parseImportFile', () => {
 })
 
 /* --------------------------------------------------------- timestamps */
+
+describe('bundled samples', () => {
+  it('browser sample parses via auto-detect', () => {
+    const r = parseImportFile(SAMPLES.browser, SAMPLE_FILENAMES.browser)
+    expect(r.source).toBe('browser')
+    expect(r.items.length).toBeGreaterThan(0)
+  })
+  it('instagram sample parses via auto-detect', () => {
+    const r = parseImportFile(SAMPLES.instagram, SAMPLE_FILENAMES.instagram)
+    expect(r.source).toBe('instagram')
+    expect(r.items.length).toBe(3)
+  })
+  it('tiktok sample parses via auto-detect', () => {
+    const r = parseImportFile(SAMPLES.tiktok, SAMPLE_FILENAMES.tiktok)
+    expect(r.source).toBe('tiktok')
+    expect(r.items.length).toBe(3)
+  })
+})
 
 describe('normalizeTimestamp', () => {
   it('handles unix seconds', () => {

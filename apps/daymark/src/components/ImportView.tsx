@@ -78,10 +78,10 @@ export function ImportView({ connected, baseUrl, apiKey, onImport, onGoToLibrary
   const [committed, setCommitted] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const ingest = (text: string, name: string) => {
+  const ingest = (text: string, name: string, srcOverride?: ImportSource) => {
     setError(null)
     setFileName(name)
-    const parsed = parseImportFile(text, name, source ?? undefined)
+    const parsed = parseImportFile(text, name, srcOverride ?? source ?? undefined)
     if (parsed.items.length === 0) {
       setResult(null)
       setError(
@@ -105,7 +105,7 @@ export function ImportView({ connected, baseUrl, apiKey, onImport, onGoToLibrary
 
   const trySample = (src: ImportSource) => {
     setSource(src)
-    ingest(SAMPLES[src], SAMPLE_FILENAMES[src])
+    ingest(SAMPLES[src], SAMPLE_FILENAMES[src], src)
   }
 
   const commit = async () => {
