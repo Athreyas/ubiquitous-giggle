@@ -4,10 +4,12 @@ import { format } from 'date-fns'
 import { NavRail, type ViewKey } from './components/NavRail'
 import { MemoriesView } from './components/MemoriesView'
 import { LibraryView } from './components/LibraryView'
+import { ImportView } from './components/ImportView'
 import { DetailModal } from './components/DetailModal'
 import { SettingsPanel } from './components/SettingsPanel'
 import { DEMO_ITEMS } from './lib/demoData'
 import { fetchKarakeepBookmarks } from './lib/karakeep'
+import { addImported, loadImported, mergeLibrary } from './lib/importStore'
 import { markDismissed, markOpened, markSurfaced, selectDailyMemories, todayKey } from './lib/selection'
 import { loadSettings, loadSurfacing, saveSettings, saveSurfacing } from './lib/storage'
 import type { KarakeepSettings, MemoryItem, SurfacingState } from './types'
@@ -15,7 +17,8 @@ import type { KarakeepSettings, MemoryItem, SurfacingState } from './types'
 export default function App() {
   const [settings, setSettings] = useState<KarakeepSettings>(() => loadSettings())
   const [surfacing, setSurfacing] = useState<SurfacingState>(() => loadSurfacing())
-  const [library, setLibrary] = useState<MemoryItem[]>([])
+  const [baseLibrary, setBaseLibrary] = useState<MemoryItem[]>([])
+  const [imported, setImported] = useState<MemoryItem[]>(() => loadImported())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [shuffleSalt, setShuffleSalt] = useState(0)
@@ -33,15 +36,15 @@ export default function App() {
     setError(null)
     try {
       if (settings.useDemo) {
-        setLibrary(DEMO_ITEMS)
+        setBaseLibrary(DEMO_ITEMS)
         return
       }
       if (!settings.baseUrl || !settings.apiKey) {
         throw new Error('Add your Daykeep URL and API key, or turn on demo mode.')
       }
-      setLibrary(await fetchKarakeepBookmarks(settings.baseUrl, settings.apiKey))
+      setBaseLibrary(await fetchKarakeepBookmarks(settings.baseUrl, settings.apiKey))
     } catch (err) {
-      setLibrary([])
+      setBaseLibrary([])
       setError(err instanceof Error ? err.message : 'Failed to load bookmarks')
     } finally {
       setLoading(false)
@@ -51,6 +54,14 @@ export default function App() {
   useEffect(() => {
     void loadLibrary()
   }, [loadLibrary])
+
+  const library = useMemo(() => mergeLibrary(baseLibrary, imported), [baseLibrary, imported])
+
+  const connected = !settings.useDemo && Boolean(settings.baseUrl && settings.apiKey)
+
+  const handleImport = useCallback((items: MemoryItem[]) => {
+    setImported(addImported(items))
+  }, [])
 
   const spotlight = useMemo(
     () => selectDailyMemories(library, surfacing, { count: 2, shuffleSalt }),
@@ -142,12 +153,20 @@ export default function App() {
                 onDismiss={handleDismiss}
                 onShuffle={() => setShuffleSalt((s) => s + 1)}
               />
-            ) : (
+            ) : view === 'library' ? (
               <LibraryView
                 items={library}
                 loading={loading}
                 error={error}
                 onOpen={openDetail}
+              />
+            ) : (
+              <ImportView
+                connected={connected}
+                baseUrl={settings.baseUrl}
+                apiKey={settings.apiKey}
+                onImport={handleImport}
+                onGoToLibrary={() => setView('library')}
               />
             )}
           </motion.div>

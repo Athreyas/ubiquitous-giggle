@@ -66,6 +66,33 @@ export const IconArrow = (p: P) => (
   </svg>
 )
 
+export const IconImport = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M12 3v11M8 10l4 4 4-4" />
+    <path d="M5 15v3a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18v-3" />
+  </svg>
+)
+
+export const IconUpload = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M12 16V5M8 9l4-4 4 4" />
+    <path d="M5 15v3a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18v-3" />
+  </svg>
+)
+
+export const IconCheck = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </svg>
+)
+
+export const IconGlobe = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M3.5 12h17M12 3.5c2.5 2.4 2.5 14.6 0 17M12 3.5c-2.5 2.4-2.5 14.6 0 17" />
+  </svg>
+)
+
 export const IconBook = (p: P) => (
   <svg {...base} {...p}>
     <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11a2 2 0 0 1 2 2v13a1.6 1.6 0 0 0-1.6-1.6H5.5A1.5 1.5 0 0 1 4 15.9z" />

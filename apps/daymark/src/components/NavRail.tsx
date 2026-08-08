@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
-import { IconGear, IconLibrary, IconSparkle } from './Icons'
+import { IconGear, IconImport, IconLibrary, IconSparkle } from './Icons'
 
-export type ViewKey = 'memories' | 'library'
+export type ViewKey = 'memories' | 'library' | 'import'
 
 interface Props {
   active: ViewKey
@@ -13,6 +13,7 @@ interface Props {
 const ITEMS: { key: ViewKey; label: string; Icon: typeof IconSparkle }[] = [
   { key: 'memories', label: 'Memories', Icon: IconSparkle },
   { key: 'library', label: 'Library', Icon: IconLibrary },
+  { key: 'import', label: 'Import', Icon: IconImport },
 ]
 
 export function NavRail({ active, onNavigate, onOpenSettings, demo }: Props) {
