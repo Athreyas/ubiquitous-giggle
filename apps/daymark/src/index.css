@@ -998,16 +998,20 @@ a {
 
 .field input[type='text'],
 .field input[type='password'],
-.field input[type='url'] {
+.field input[type='url'],
+.field textarea {
   border: 1px solid var(--hairline);
   border-radius: 12px;
   padding: 12px 14px;
   background: var(--surface);
   color: var(--text);
   transition: border-color 160ms ease;
+  font: inherit;
+  resize: vertical;
 }
 
-.field input:focus {
+.field input:focus,
+.field textarea:focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -1325,6 +1329,117 @@ a {
 .import-check svg {
   width: 28px;
   height: 28px;
+}
+
+/* ============================================================
+   Capture view
+   ============================================================ */
+
+.seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  margin-bottom: 20px;
+}
+
+.seg-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-soft);
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-weight: 550;
+  font-size: 0.9rem;
+  transition: color 180ms ease;
+}
+
+.seg-btn svg {
+  width: 17px;
+  height: 17px;
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.active {
+  color: #17121f;
+}
+
+.seg-glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: 999px;
+  background: var(--aurora);
+}
+
+.capture-card {
+  border-radius: var(--radius);
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  padding: 22px;
+  max-width: 720px;
+}
+
+.capture-preview {
+  position: relative;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  background: #000;
+}
+
+.capture-preview img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+}
+
+.capture-remove {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.capture-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 12px 18px;
+  border-radius: 999px;
+  background: var(--bg-1);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-float);
+  font-size: 0.92rem;
+}
+
+.toast-check {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--aurora);
+  color: #17121f;
+}
+
+.toast-check svg {
+  width: 15px;
+  height: 15px;
 }
 
 /* ============================================================

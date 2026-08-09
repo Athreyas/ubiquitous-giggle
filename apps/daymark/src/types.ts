@@ -6,6 +6,7 @@ export type Platform =
   | 'tiktok'
   | 'article'
   | 'note'
+  | 'image'
   | 'other'
 
 export interface MemoryItem {
@@ -20,6 +21,13 @@ export interface MemoryItem {
   platform: Platform
   createdAt: string
   archived?: boolean
+  /**
+   * Text extracted from the item for search/indexing — OCR text from a
+   * screenshot, a caption, page body, etc. Filled by the extraction layer.
+   */
+  extractedText?: string
+  /** Derived keywords/hashtags/mentions used to boost search relevance. */
+  keywords?: string[]
 }
 
 export interface SurfacingState {

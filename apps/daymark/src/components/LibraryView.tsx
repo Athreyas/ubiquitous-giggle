@@ -3,6 +3,7 @@ import { motion } from 'motion/react'
 import type { MemoryItem, Platform } from '../types'
 import { MemoryCard } from './MemoryCard'
 import { IconSearch } from './Icons'
+import { search } from '../lib/search'
 
 interface Props {
   items: MemoryItem[]
@@ -19,6 +20,7 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: 'youtube', label: 'Videos' },
   { key: 'instagram', label: 'Instagram' },
   { key: 'tiktok', label: 'TikTok' },
+  { key: 'image', label: 'Screenshots' },
   { key: 'note', label: 'Notes' },
 ]
 
@@ -27,17 +29,11 @@ export function LibraryView({ items, loading, error, onOpen }: Props) {
   const [filter, setFilter] = useState<Filter>('all')
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return items.filter((item) => {
-      if (filter !== 'all' && item.platform !== filter) return false
-      if (!q) return true
-      return (
-        item.title.toLowerCase().includes(q) ||
-        item.summary.toLowerCase().includes(q) ||
-        (item.note ?? '').toLowerCase().includes(q) ||
-        item.tags.some((t) => t.toLowerCase().includes(q))
-      )
-    })
+    const byPlatform =
+      filter === 'all' ? items : items.filter((item) => item.platform === filter)
+    // Ranked, multi-term search across titles, tags, notes, URLs and
+    // on-device–extracted text (OCR/keywords). Empty query keeps order.
+    return search(byPlatform, query)
   }, [items, query, filter])
 
   const available = useMemo(() => {
