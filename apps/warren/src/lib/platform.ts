@@ -1,4 +1,4 @@
-import type { ComponentType, SVGProps } from 'react'
+import type { ComponentType } from 'react'
 import type { Platform } from '../types'
 import {
   GlyphCamera,
@@ -40,32 +40,23 @@ export function platformLabel(platform: Platform): string {
 
 export interface PlatformMeta {
   label: string
-  /** Background for the badge dot */
   swatch: string
-  glyph: ComponentType<SVGProps<SVGSVGElement>>
+  glyph: ComponentType<{ className?: string }>
 }
 
 export function platformMeta(platform: Platform): PlatformMeta {
   switch (platform) {
     case 'youtube':
-      return { label: 'YouTube', swatch: '#ff4e45', glyph: GlyphPlay }
+      return { label: 'YouTube', swatch: '#1F4B3F', glyph: GlyphPlay }
     case 'instagram':
-      return {
-        label: 'Instagram',
-        swatch: 'linear-gradient(135deg,#f9a03c,#dd2a7b 55%,#8134af)',
-        glyph: GlyphCamera,
-      }
+      return { label: 'Instagram', swatch: '#1F4B3F', glyph: GlyphCamera }
     case 'tiktok':
-      return {
-        label: 'TikTok',
-        swatch: 'linear-gradient(135deg,#25f4ee,#000 50%,#fe2c55)',
-        glyph: GlyphMusic,
-      }
+      return { label: 'TikTok', swatch: '#1F4B3F', glyph: GlyphMusic }
     case 'article':
-      return { label: 'Article', swatch: 'linear-gradient(135deg,#8b6dff,#5b46c9)', glyph: GlyphDoc }
+      return { label: 'Article', swatch: '#1F4B3F', glyph: GlyphDoc }
     case 'note':
-      return { label: 'Note', swatch: 'linear-gradient(135deg,#ffcf7a,#e0a24a)', glyph: GlyphNote }
+      return { label: 'Note', swatch: '#1F4B3F', glyph: GlyphNote }
     default:
-      return { label: 'Saved', swatch: 'linear-gradient(135deg,#b6b5c4,#7d7c90)', glyph: GlyphDoc }
+      return { label: 'Saved', swatch: '#1F4B3F', glyph: GlyphDoc }
   }
 }

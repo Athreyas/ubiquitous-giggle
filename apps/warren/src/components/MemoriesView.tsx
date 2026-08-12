@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import type { MemoryItem } from '../types'
 import { SpotlightCard } from './SpotlightCard'
 import { MemoryCard } from './MemoryCard'
@@ -16,6 +16,12 @@ interface Props {
   onShuffle: () => void
 }
 
+const EMPTY_ASCII = `    .--.
+   /    \\
+  |  ()  |   a quiet warren
+   \\    /
+    '--'`
+
 export function MemoriesView({
   todayLabel,
   spotlight,
@@ -27,17 +33,17 @@ export function MemoriesView({
   onDismiss,
   onShuffle,
 }: Props) {
+  const reduce = useReducedMotion()
+
   return (
-    <div>
-      <header className="view-head memories-head">
+    <div className="echo">
+      <header className="echo-head">
         <div>
-          <div className="kicker">Today · {todayLabel}</div>
-          <h1 className="display-title">
-            Your <span className="grad">memories</span>
-          </h1>
-          <p className="view-lede">
-            A calm resurfacing of things you saved and almost forgot — reels, recipes,
-            places and ideas from your second brain. Swipe a card away, or open it again.
+          <div className="kicker">Daily Echo · {todayLabel}</div>
+          <h1 className="echo-title">Today&apos;s quiet returns</h1>
+          <p className="echo-lede">
+            A calm resurfacing of things you saved and almost forgot. Open a Star again —
+            or set it aside for another day.
           </p>
         </div>
         <button type="button" className="btn btn-ghost" onClick={onShuffle}>
@@ -48,7 +54,7 @@ export function MemoriesView({
       {loading ? (
         <div className="state">
           <div className="spinner" />
-          <h3>Gathering memories…</h3>
+          <h3>Gathering today&apos;s Echo…</h3>
           <p>Looking through your saves for something worth a second look.</p>
         </div>
       ) : error ? (
@@ -58,7 +64,8 @@ export function MemoriesView({
         </div>
       ) : spotlight.length === 0 ? (
         <div className="state">
-          <h3>Nothing forgotten yet</h3>
+          <pre className="ascii">{EMPTY_ASCII}</pre>
+          <h3>No Echo yet</h3>
           <p>
             Save a few links, reels or notes, let them rest a week, and Warren will start
             resurfacing them here.
@@ -66,7 +73,7 @@ export function MemoriesView({
         </div>
       ) : (
         <>
-          <section className="spotlight">
+          <section className="spotlight" aria-label="Today's Stars">
             <div className="spotlight-deck">
               <AnimatePresence mode="popLayout">
                 {spotlight.map((item, i) => (
@@ -76,6 +83,7 @@ export function MemoriesView({
                     index={i}
                     onOpen={onOpen}
                     onDismiss={onDismiss}
+                    reduceMotion={Boolean(reduce)}
                   />
                 ))}
               </AnimatePresence>
@@ -83,17 +91,23 @@ export function MemoriesView({
           </section>
 
           {feed.length > 0 ? (
-            <section>
-              <div className="section-label">
+            <section className="echo-more">
+              <div className="echo-more-head">
                 <h3>More from your past</h3>
-                <span className="rule" />
-                <span className="count">{feed.length} resurfaced</span>
+                <span>{feed.length} resurfaced</span>
               </div>
-              <motion.div className="card-grid" layout>
+              <div className="echo-feed">
                 {feed.map((item, i) => (
-                  <MemoryCard key={item.id} item={item} index={i} onOpen={onOpenCard} />
+                  <motion.div
+                    key={item.id}
+                    initial={reduce ? false : { opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: reduce ? 0 : 0.04 * i, duration: reduce ? 0 : 0.28 }}
+                  >
+                    <MemoryCard item={item} onOpen={onOpenCard} />
+                  </motion.div>
                 ))}
-              </motion.div>
+              </div>
             </section>
           ) : null}
         </>
