@@ -60,6 +60,8 @@ export async function apiFetch<T>(
       headers,
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
+      // Prefer httpOnly `warren_session` cookie when present; Bearer remains a fallback.
+      credentials: 'include',
     })
   } catch (err) {
     throw new ApiError(

@@ -23,7 +23,7 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo, signedIn }: 
         <div className="brand-orb" aria-hidden />
         <div>
           <div className="brand-name">Warren</div>
-          <div className="brand-sub">Living memory</div>
+          <div className="brand-sub">everything, all connected</div>
         </div>
       </div>
 

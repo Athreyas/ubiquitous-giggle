@@ -298,6 +298,37 @@ describe('saves', () => {
     expect(asset.headers.get('content-type')).toContain('text/plain')
     await expect(asset.text()).resolves.toBe('hello asset')
   })
+
+  it('stores and returns an on-device embedding for a save', async () => {
+    const { body: registered } = await register('embed@example.com')
+    const create = await postJson('/api/v1/saves', registered.token, {
+      type: 'text',
+      title: 'Embedding note',
+      summary: 'Local vectors without a cloud LLM.',
+      tags: ['ml'],
+      platform: 'note',
+    })
+    const created = (await create.json()) as MemoryItemBody
+    const vector = Array.from({ length: 16 }, (_, i) => (i % 2 === 0 ? 0.1 : -0.1))
+
+    const put = await app.request(`/api/v1/saves/${created.id}/embedding`, {
+      method: 'PUT',
+      headers: jsonAuthHeaders(registered.token),
+      body: JSON.stringify({ model: 'warren-hash-v1', dims: 16, vector }),
+    })
+    expect(put.status).toBe(200)
+
+    const get = await app.request(`/api/v1/saves/${created.id}/embedding`, {
+      headers: authHeaders(registered.token),
+    })
+    expect(get.status).toBe(200)
+    await expect(get.json()).resolves.toMatchObject({
+      saveId: created.id,
+      model: 'warren-hash-v1',
+      dims: 16,
+      vector,
+    })
+  })
 })
 
 async function register(email: string) {

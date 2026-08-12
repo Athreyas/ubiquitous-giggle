@@ -11,10 +11,22 @@ import type { z } from 'zod'
 
 import { createToken, hashPassword, hashToken, tokenExpiry, verifyPassword } from './auth.js'
 import { createDatabase, type DatabaseClient } from './db.js'
-import { enrichmentJobs, saves, spaces, surfacingState, tokens, users, type EnrichmentJob, type Save, type User } from './schema.js'
+import {
+  embeddings,
+  enrichmentJobs,
+  saves,
+  spaces,
+  surfacingState,
+  tokens,
+  users,
+  type EnrichmentJob,
+  type Save,
+  type User,
+} from './schema.js'
 import {
   batchSavesSchema,
   createSaveSchema,
+  embeddingUpsertSchema,
   loginSchema,
   patchSaveSchema,
   registerSchema,
@@ -434,6 +446,37 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     return c.json(toEnrichmentStatus(job))
   })
 
+  app.put('/api/v1/saves/:id/embedding', requireAuth, async (c) => {
+    const save = getSaveForUser(db, c.get('user').id, c.req.param('id'))
+    if (!save) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+    const input = await readJson(c, embeddingUpsertSchema)
+    if (input.vector.length !== input.dims) {
+      throw new HTTPException(400, { message: 'vector length must match dims.' })
+    }
+    upsertEmbedding(db, save.id, input.model, input.vector)
+    return c.json({ saveId: save.id, model: input.model, dims: input.dims })
+  })
+
+  app.get('/api/v1/saves/:id/embedding', requireAuth, (c) => {
+    const save = getSaveForUser(db, c.get('user').id, c.req.param('id'))
+    if (!save) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+    const row = db.select().from(embeddings).where(eq(embeddings.saveId, save.id)).get()
+    if (!row) {
+      throw new HTTPException(404, { message: 'Embedding not found.' })
+    }
+    return c.json({
+      saveId: row.saveId,
+      model: row.model,
+      dims: row.dims,
+      vector: JSON.parse(row.vectorJson) as number[],
+      createdAt: row.createdAt,
+    })
+  })
+
   app.get('/api/v1/surfacing', requireAuth, (c) => {
     return c.json(loadSurfacingState(db, c.get('user').id))
   })
@@ -722,6 +765,10 @@ async function processPendingEnrichmentJobs(database: DatabaseClient): Promise<v
         .where(eq(saves.id, save.id))
         .run()
 
+      // Local hashed embedding — no cloud LLM (MARK-3 web fallback until CoreML/transformers lands).
+      const vector = hashEmbed(result.extractedText || save.title)
+      upsertEmbedding(db, save.id, 'warren-hash-v1', vector)
+
       db.update(enrichmentJobs)
         .set({
           status: 'done',
@@ -760,7 +807,7 @@ async function enrichSave(save: Save): Promise<{ extractedText: string; keywords
 async function fetchText(url: string): Promise<string> {
   const response = await fetch(url, {
     headers: {
-      'User-Agent': 'Daymark API enrichment stub',
+      'User-Agent': 'Warren API enrichment stub',
     },
     signal: AbortSignal.timeout(2500),
   })
@@ -839,6 +886,50 @@ function parseStringArray(raw: string | null): string[] {
   } catch {
     return []
   }
+}
+
+/** Deterministic local embedding (no cloud). Swap for transformers.js / CoreML later. */
+function hashEmbed(text: string, dims = 384): number[] {
+  const vector = new Array<number>(dims).fill(0)
+  const tokens = text.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) ?? ['empty']
+  for (const token of tokens) {
+    const digest = createHash('sha256').update(token).digest()
+    for (let i = 0; i < dims; i += 1) {
+      const byte = digest[i % digest.length]
+      vector[i] += ((byte / 255) * 2 - 1) / Math.sqrt(tokens.length)
+    }
+  }
+  let norm = 0
+  for (const value of vector) norm += value * value
+  norm = Math.sqrt(norm) || 1
+  return vector.map((value) => value / norm)
+}
+
+function upsertEmbedding(
+  db: DatabaseClient['db'],
+  saveId: string,
+  model: string,
+  vector: number[],
+): void {
+  const now = new Date().toISOString()
+  db.insert(embeddings)
+    .values({
+      saveId,
+      model,
+      dims: vector.length,
+      vectorJson: JSON.stringify(vector),
+      createdAt: now,
+    })
+    .onConflictDoUpdate({
+      target: embeddings.saveId,
+      set: {
+        model,
+        dims: vector.length,
+        vectorJson: JSON.stringify(vector),
+        createdAt: now,
+      },
+    })
+    .run()
 }
 
 function getSaveForUser(db: DatabaseClient['db'], userId: string, id: string): Save | undefined {
