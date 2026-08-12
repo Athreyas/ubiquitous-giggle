@@ -21,7 +21,12 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo }: Props) {
   return (
     <aside className="rail">
       <div className="brand">
-        <div className="brand-orb" aria-hidden />
+        <motion.div
+          className="brand-orb"
+          aria-hidden
+          animate={{ rotate: [0, 8, -6, 0], scale: [1, 1.04, 1] }}
+          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+        />
         <div>
           <div className="brand-name">Daymark</div>
           <div className="brand-sub">Living memory</div>
@@ -41,11 +46,20 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo }: Props) {
               <motion.span
                 className="nav-glow"
                 layoutId="nav-glow"
-                transition={{ type: 'spring', stiffness: 400, damping: 34 }}
+                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               />
             ) : null}
-            <Icon />
-            <span>{label}</span>
+            <span className="nav-icon">
+              <Icon width={20} height={20} />
+            </span>
+            <motion.span
+              className="nav-label"
+              initial={false}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.02 }}
+            >
+              {label}
+            </motion.span>
           </button>
         ))}
       </nav>
@@ -62,7 +76,7 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo }: Props) {
           )}
         </div>
         <button type="button" className="btn btn-ghost" onClick={onOpenSettings}>
-          <IconGear /> Connect library
+          <IconGear width={18} height={18} /> Connect library
         </button>
       </div>
     </aside>

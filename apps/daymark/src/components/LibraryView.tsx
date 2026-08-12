@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
-import { motion } from 'motion/react'
+import { AnimatePresence, motion } from 'motion/react'
 import type { MemoryItem, Platform } from '../types'
 import { MemoryCard } from './MemoryCard'
+import { Collections } from './Collections'
 import { IconSearch } from './Icons'
 import { search } from '../lib/search'
 
@@ -31,8 +32,6 @@ export function LibraryView({ items, loading, error, onOpen }: Props) {
   const filtered = useMemo(() => {
     const byPlatform =
       filter === 'all' ? items : items.filter((item) => item.platform === filter)
-    // Ranked, multi-term search across titles, tags, notes, URLs and
-    // on-device–extracted text (OCR/keywords). Empty query keeps order.
     return search(byPlatform, query)
   }, [items, query, filter])
 
@@ -40,6 +39,8 @@ export function LibraryView({ items, loading, error, onOpen }: Props) {
     const set = new Set(items.map((i) => i.platform))
     return FILTERS.filter((f) => f.key === 'all' || set.has(f.key as Platform))
   }, [items])
+
+  const showCollections = !query.trim() && filter === 'all' && !loading && !error
 
   return (
     <div>
@@ -49,8 +50,8 @@ export function LibraryView({ items, loading, error, onOpen }: Props) {
           Everything you <span className="grad">saved</span>
         </h1>
         <p className="view-lede">
-          Your whole second brain in one calm, visual place. Search by word or filter by
-          where it came from.
+          Your whole second brain in one calm, visual place. Browse collections, search by
+          meaning, or filter by where it came from.
         </p>
       </header>
 
@@ -59,7 +60,7 @@ export function LibraryView({ items, loading, error, onOpen }: Props) {
           <IconSearch />
           <input
             type="text"
-            placeholder="Search titles, notes, tags…"
+            placeholder="Search titles, notes, tags, extracted text…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search your library"
@@ -67,17 +68,21 @@ export function LibraryView({ items, loading, error, onOpen }: Props) {
         </label>
         <div className="filters">
           {available.map((f) => (
-            <button
+            <motion.button
               key={f.key}
               type="button"
               className={`chip ${filter === f.key ? 'active' : ''}`}
               onClick={() => setFilter(f.key)}
+              whileTap={{ scale: 0.96 }}
+              layout
             >
               {f.label}
-            </button>
+            </motion.button>
           ))}
         </div>
       </div>
+
+      {showCollections ? <Collections items={items} onOpen={onOpen} /> : null}
 
       {loading ? (
         <div className="state">
@@ -95,11 +100,22 @@ export function LibraryView({ items, loading, error, onOpen }: Props) {
           <p>No saves match that search. Try another word or clear the filter.</p>
         </div>
       ) : (
-        <motion.div className="card-grid" layout>
-          {filtered.map((item, i) => (
-            <MemoryCard key={item.id} item={item} index={i} onOpen={onOpen} />
-          ))}
-        </motion.div>
+        <section>
+          {showCollections ? (
+            <div className="section-label">
+              <h3>All saves</h3>
+              <span className="rule" />
+              <span className="count">{filtered.length}</span>
+            </div>
+          ) : null}
+          <AnimatePresence mode="popLayout">
+            <motion.div className="card-grid" layout>
+              {filtered.map((item, i) => (
+                <MemoryCard key={item.id} item={item} index={i} onOpen={onOpen} />
+              ))}
+            </motion.div>
+          </AnimatePresence>
+        </section>
       )}
     </div>
   )

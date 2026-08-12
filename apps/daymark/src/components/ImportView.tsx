@@ -1,4 +1,4 @@
-import { useRef, useState, type ComponentType, type SVGProps } from 'react'
+import { useRef, useState, type ComponentType } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { MemoryItem } from '../types'
 import { humanAge } from '../lib/selection'
@@ -24,7 +24,7 @@ interface Props {
 type SourceInfo = {
   key: ImportSource
   label: string
-  icon: ComponentType<SVGProps<SVGSVGElement>>
+  icon: ComponentType<{ width?: number | string; height?: number | string }>
   blurb: string
   steps: string[]
 }

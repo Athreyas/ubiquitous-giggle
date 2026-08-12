@@ -6,6 +6,7 @@ import { MemoriesView } from './components/MemoriesView'
 import { LibraryView } from './components/LibraryView'
 import { ImportView } from './components/ImportView'
 import { CaptureView } from './components/CaptureView'
+import { AmbientBackground } from './components/AmbientBackground'
 import { DetailModal } from './components/DetailModal'
 import { SettingsPanel } from './components/SettingsPanel'
 import { DEMO_ITEMS } from './lib/demoData'
@@ -131,6 +132,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <AmbientBackground />
       <NavRail
         active={view}
         onNavigate={setView}
@@ -142,10 +144,11 @@ export default function App() {
         <AnimatePresence mode="wait">
           <motion.div
             key={view}
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+            className="view-pane"
+            initial={{ opacity: 0, y: 18, filter: 'blur(6px)', scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)', scale: 1 }}
+            exit={{ opacity: 0, y: -12, filter: 'blur(4px)', scale: 0.99 }}
+            transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
           >
             {view === 'memories' ? (
               <MemoriesView
