@@ -113,6 +113,7 @@ describe('auth', () => {
       .from(spaces)
       .where(eq(spaces.userId, registered.user.id))
       .all()
+      .sort((left, right) => left.position - right.position)
 
     expect(seeded.map((space) => [space.name, space.slug, space.position])).toEqual([
       ['Personal', 'personal', 0],

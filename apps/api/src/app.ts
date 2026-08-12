@@ -522,7 +522,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 
 function buildSavesEtag(database: DatabaseClient, userId: string): string {
   const row = database.sqlite
-    .prepare('SELECT COALESCE(MAX(updated_at), "") AS max_updated_at FROM saves WHERE user_id = ?')
+    .prepare("SELECT COALESCE(MAX(updated_at), '') AS max_updated_at FROM saves WHERE user_id = ?")
     .get(userId) as { max_updated_at: string }
   const digest = createHash('sha256').update(`${userId}:${row.max_updated_at}`).digest('hex').slice(0, 16)
   return `"saves-${digest}"`
