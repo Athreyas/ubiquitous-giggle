@@ -1,8 +1,12 @@
 import type { LibrarySettings, SurfacingState } from '../types'
 import { DEFAULT_API_BASE_URL, defaultLibrarySettings } from '../types'
 
-const SURFACING_KEY = 'daymark.surfacing.v1'
-const SETTINGS_KEY = 'daymark.settings.v1'
+const SURFACING_KEY = 'warren.surfacing.v1'
+const SETTINGS_KEY = 'warren.settings.v1'
+
+// Pre-rebrand keys (product was named Daymark). One-time migration below.
+const LEGACY_SURFACING_KEY = 'daymark.surfacing.v1'
+const LEGACY_SETTINGS_KEY = 'daymark.settings.v1'
 
 const defaultSurfacing = (): SurfacingState => ({
   byDay: {},
@@ -11,8 +15,22 @@ const defaultSurfacing = (): SurfacingState => ({
   dismissed: [],
 })
 
+/** One-time migration of localStorage data from the pre-rebrand `daymark.*` keys. */
+function migrateLegacyKey(legacyKey: string, newKey: string): void {
+  try {
+    if (localStorage.getItem(newKey) !== null) return
+    const legacyRaw = localStorage.getItem(legacyKey)
+    if (legacyRaw === null) return
+    localStorage.setItem(newKey, legacyRaw)
+    localStorage.removeItem(legacyKey)
+  } catch {
+    // Ignore storage access failures (e.g. disabled localStorage).
+  }
+}
+
 export function loadSurfacing(): SurfacingState {
   try {
+    migrateLegacyKey(LEGACY_SURFACING_KEY, SURFACING_KEY)
     const raw = localStorage.getItem(SURFACING_KEY)
     if (!raw) return defaultSurfacing()
     return { ...defaultSurfacing(), ...JSON.parse(raw) }
@@ -52,6 +70,7 @@ function migrateLegacySettings(legacy: LegacySettings): LibrarySettings {
 
 export function loadSettings(): LibrarySettings {
   try {
+    migrateLegacyKey(LEGACY_SETTINGS_KEY, SETTINGS_KEY)
     const raw = localStorage.getItem(SETTINGS_KEY)
     if (!raw) return defaultLibrarySettings()
     const parsed = JSON.parse(raw) as unknown

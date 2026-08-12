@@ -33,7 +33,7 @@ export interface SurfacingState {
   dismissed: string[]
 }
 
-/** Signed-in Daymark account. */
+/** Signed-in Warren account. */
 export interface User {
   id: string
   email: string
@@ -42,7 +42,7 @@ export interface User {
 
 /**
  * Client connection + auth settings, persisted to localStorage.
- * `token` is the Bearer token for the Daymark API (`apps/api`), empty when logged out.
+ * `token` is the Bearer token for the Warren API (`apps/api`), empty when logged out.
  */
 export interface LibrarySettings {
   useDemo: boolean

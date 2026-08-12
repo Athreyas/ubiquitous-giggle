@@ -1,6 +1,6 @@
 import type { MemoryItem } from '../types'
 
-/** Seed library so Daily Memory works without a live Daymark API instance. */
+/** Seed library so Daily Memory works without a live Warren API instance. */
 export const DEMO_ITEMS: MemoryItem[] = [
   {
     id: 'demo-1',
@@ -150,9 +150,9 @@ export const DEMO_ITEMS: MemoryItem[] = [
     type: 'text',
     title: 'Idea: a weekly “memory lane” recap',
     summary:
-      'What if Sunday morning surfaced a small reel of everything you saved that week — a gentle recap instead of a firehose? Could become the heart of Daymark.',
+      'What if Sunday morning surfaced a small reel of everything you saved that week — a gentle recap instead of a firehose? Could become the heart of Warren.',
     note: 'Product idea — revisit',
-    tags: ['idea', 'product', 'daymark'],
+    tags: ['idea', 'product', 'warren'],
     platform: 'note',
     createdAt: daysAgo(16),
   },

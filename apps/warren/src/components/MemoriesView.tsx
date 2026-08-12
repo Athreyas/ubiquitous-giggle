@@ -60,7 +60,7 @@ export function MemoriesView({
         <div className="state">
           <h3>Nothing forgotten yet</h3>
           <p>
-            Save a few links, reels or notes, let them rest a week, and Daymark will start
+            Save a few links, reels or notes, let them rest a week, and Warren will start
             resurfacing them here.
           </p>
         </div>

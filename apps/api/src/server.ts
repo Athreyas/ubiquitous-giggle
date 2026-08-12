@@ -11,6 +11,6 @@ serve(
     hostname: '0.0.0.0',
   },
   (info) => {
-    console.log(`Daymark API listening on http://127.0.0.1:${info.port}`)
+    console.log(`Warren API listening on http://127.0.0.1:${info.port}`)
   },
 )

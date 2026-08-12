@@ -1,7 +1,7 @@
 import type { BookmarkType, LibrarySettings, Platform } from '../../types'
 import { apiFetch } from './client'
 
-/** Wire shape for a save returned by the Daymark API (`MemoryItem`). */
+/** Wire shape for a save returned by the Warren API (`MemoryItem`). */
 export interface Save {
   id: string
   type: BookmarkType

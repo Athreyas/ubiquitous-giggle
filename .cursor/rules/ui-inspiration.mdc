@@ -5,7 +5,7 @@ alwaysApply: true
 
 # UI inspiration — core memory
 
-Curated, approved toolbox for building UI across Daymark (and other
+Curated, approved toolbox for building UI across Warren (and other
 projects that copy this rule). When you build or restyle UI, need an icon, a
 font, a background, a logo, a generated image, or motion — **reach for the
 matching resource below first** rather than inventing from scratch.
@@ -56,7 +56,7 @@ Human-readable copy (portable to other repos): `docs/ui-inspiration.md`.
 
 - **Match by intent** (component → shadcn/Watermelon; icon → Iconify; background → Pattern Monster/Pryzm; motion → Casberry/OriginKit; logo → Logo Diffusion; poster/art → Ideogram/Krea; font → Not Your Type; effect → Ditther; template → HorizonX/daisyUI).
 - **Prefer MCP where available** (daisyUI, OriginKit): if their MCP server is configured for the run, use it; otherwise follow the site's copy-paste flow.
-- **Stack note (Daymark):** the Daymark app currently uses React 19 + Vite + Motion (framer) with a hand-authored dark, cinematic CSS design system — it does **not** yet use Tailwind. shadcn / daisyUI / Watermelon are Tailwind-based, so adopting their components means adding Tailwind first; otherwise port the markup and restyle with the existing design tokens. Keep the aurora-accent, glass, Fraunces-display / Inter-UI aesthetic consistent.
+- **Stack note (Warren):** the Warren app currently uses React 19 + Vite + Motion (framer) with a hand-authored dark, cinematic CSS design system — it does **not** yet use Tailwind. shadcn / daisyUI / Watermelon are Tailwind-based, so adopting their components means adding Tailwind first; otherwise port the markup and restyle with the existing design tokens. Keep the aurora-accent, glass, Fraunces-display / Inter-UI aesthetic consistent.
 - **Attribution/licensing:** check each source's license before shipping generated logos/art or bundling assets.
 
 ## Reusing across projects & maintenance

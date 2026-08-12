@@ -2,20 +2,20 @@
 
 ## Cursor Cloud specific instructions
 
-Daymark is a standalone Vite + React client (`apps/daymark`) plus a Hono sync API (`apps/api`). The former AGPL soft-fork tree has been removed.
+Warren (formerly named Daymark) is a standalone Vite + React client (`apps/warren`) plus a Hono sync API (`apps/api`). The former AGPL soft-fork tree has been removed.
 
 ### Services
 
 | Service | Command | URL |
 |---------|---------|-----|
-| Daymark client | `bash .cursor/start-daymark.sh` (or `cd apps/daymark && npm run dev`) | `http://127.0.0.1:5173/` |
-| Daymark API | `bash .cursor/start-api.sh` (or `cd apps/api && npm run dev`) | `http://127.0.0.1:8787/` |
+| Warren client | `bash .cursor/start-warren.sh` (or `cd apps/warren && npm run dev`) | `http://127.0.0.1:5173/` |
+| Warren API | `bash .cursor/start-api.sh` (or `cd apps/api && npm run dev`) | `http://127.0.0.1:8787/` |
 
 Demo mode in the client works **without** the API. Synced library / auth requires the API.
 
 ### Lint / test / build
 
-- Client: `cd apps/daymark && npm run lint && npm run build` (and `npm test` when present)
+- Client: `cd apps/warren && npm run lint && npm run build` (and `npm test` when present)
 - API: `cd apps/api && npm run lint && npm test`
 
 ### Gotchas

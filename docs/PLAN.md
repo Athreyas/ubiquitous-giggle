@@ -1,8 +1,8 @@
-# Daymark product plan
+# Warren product plan
 
 > Historical Phase 0–2 notes that referenced an external bookmark fork have been
-> removed as part of Epic 0 (standalone Daymark). Current stack: `apps/daymark`
-> (Vite client) + `apps/api` (Hono sync API).
+> removed as part of Epic 0 (standalone Warren, formerly named Daymark). Current
+> stack: `apps/warren` (Vite client) + `apps/api` (Hono sync API).
 
 ## Direction
 

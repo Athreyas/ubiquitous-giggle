@@ -1,6 +1,6 @@
 import type { LibrarySettings } from '../../types'
 
-/** Thrown for any non-2xx or network-level failure from the Daymark API. */
+/** Thrown for any non-2xx or network-level failure from the Warren API. */
 export class ApiError extends Error {
   status: number
 
@@ -38,7 +38,7 @@ function extractErrorMessage(data: unknown, fallback: string): string {
 }
 
 /**
- * Fetch wrapper for the Daymark API: resolves the base URL from settings,
+ * Fetch wrapper for the Warren API: resolves the base URL from settings,
  * attaches the Bearer token when present, and normalizes errors.
  */
 export async function apiFetch<T>(
@@ -64,7 +64,7 @@ export async function apiFetch<T>(
   } catch (err) {
     throw new ApiError(
       0,
-      err instanceof Error ? err.message : 'Could not reach the Daymark API.',
+      err instanceof Error ? err.message : 'Could not reach the Warren API.',
     )
   }
 
