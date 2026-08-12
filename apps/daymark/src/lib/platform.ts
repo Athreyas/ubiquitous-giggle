@@ -1,4 +1,4 @@
-import type { ComponentType, SVGProps } from 'react'
+import type { ComponentType } from 'react'
 import type { Platform } from '../types'
 import {
   GlyphCamera,
@@ -45,7 +45,8 @@ export interface PlatformMeta {
   label: string
   /** Background for the badge dot */
   swatch: string
-  glyph: ComponentType<SVGProps<SVGSVGElement>>
+  // Iconify wrappers accept width/height/className; keep this loose.
+  glyph: ComponentType<{ width?: number | string; height?: number | string; className?: string }>
 }
 
 export function platformMeta(platform: Platform): PlatformMeta {

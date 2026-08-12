@@ -7,7 +7,7 @@ export function PlatformBadge({ platform }: { platform: Platform }) {
   return (
     <span className="pill">
       <span className="dot" style={{ background: meta.swatch }}>
-        <Glyph />
+        <Glyph width={12} height={12} />
       </span>
       {meta.label}
     </span>

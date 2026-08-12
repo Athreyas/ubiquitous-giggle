@@ -14,10 +14,19 @@ export function MemoryCard({ item, index = 0, onOpen }: Props) {
     <motion.article
       className="mcard"
       layoutId={`card-${item.id}`}
+      variants={{
+        hidden: { opacity: 0, y: 22, scale: 0.97 },
+        show: { opacity: 1, y: 0, scale: 1 },
+      }}
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: Math.min(index * 0.045, 0.4), ease: [0.22, 1, 0.36, 1] }}
-      whileHover={{ y: -6 }}
+      transition={{
+        duration: 0.5,
+        delay: Math.min(index * 0.045, 0.4),
+        ease: [0.22, 1, 0.36, 1],
+      }}
+      whileHover={{ y: -8, transition: { type: 'spring', stiffness: 380, damping: 22 } }}
+      whileTap={{ scale: 0.985 }}
       onClick={() => onOpen(item)}
       role="button"
       tabIndex={0}
@@ -35,6 +44,7 @@ export function MemoryCard({ item, index = 0, onOpen }: Props) {
         ) : (
           <span className="mcard-noimg-glyph">{item.title.slice(0, 1)}</span>
         )}
+        <span className="mcard-sheen" aria-hidden />
       </div>
       <div className="mcard-body">
         <p className="mcard-age">{humanAge(item)}</p>

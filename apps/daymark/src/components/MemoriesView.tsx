@@ -40,9 +40,15 @@ export function MemoriesView({
             places and ideas from your second brain. Swipe a card away, or open it again.
           </p>
         </div>
-        <button type="button" className="btn btn-ghost" onClick={onShuffle}>
-          <IconShuffle /> Show different
-        </button>
+        <motion.button
+          type="button"
+          className="btn btn-ghost"
+          onClick={onShuffle}
+          whileTap={{ scale: 0.96, rotate: -4 }}
+          whileHover={{ y: -1 }}
+        >
+          <IconShuffle width={18} height={18} /> Show different
+        </motion.button>
       </header>
 
       {loading ? (
