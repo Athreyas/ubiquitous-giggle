@@ -12,7 +12,7 @@ export const DEMO_ITEMS: MemoryItem[] = [
     note: 'Read before the design sprint',
     tags: ['creativity', 'health', 'research'],
     thumbnailUrl:
-      'https://images.unsplash.com/photo-1511295742362-92cda5412afb?w=1200&q=80',
+      'https://images.unsplash.com/photo-1444703686981-a3abbc4d4fe3?w=1200&q=80',
     platform: 'article',
     createdAt: daysAgo(45),
   },
@@ -38,7 +38,7 @@ export const DEMO_ITEMS: MemoryItem[] = [
       'Twelve-minute talk on spacing rhythm, soft shadows, and why one accent color beats a rainbow of badges.',
     tags: ['design', 'css', 'ui'],
     thumbnailUrl:
-      'https://images.unsplash.com/photo-1523437113733-ab79c9694d0e?w=1200&q=80',
+      'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=1200&q=80',
     platform: 'youtube',
     createdAt: daysAgo(18),
   },
@@ -104,6 +104,70 @@ export const DEMO_ITEMS: MemoryItem[] = [
       'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=1200&q=80',
     platform: 'article',
     createdAt: daysAgo(8),
+  },
+  {
+    id: 'demo-9',
+    type: 'link',
+    title: 'Weeknight miso-butter pasta',
+    url: 'https://www.youtube.com/watch?v=demorecipe',
+    summary:
+      'Ten-minute pasta: brown butter, a spoon of white miso, black pepper, and a fistful of chives. The kind of thing you meant to cook and forgot you saved.',
+    note: 'Try with the leftover parmesan rind',
+    tags: ['cooking', 'recipe', 'food'],
+    thumbnailUrl:
+      'https://images.unsplash.com/photo-1473093295043-cdd812d0e601?w=1200&q=80',
+    platform: 'youtube',
+    createdAt: daysAgo(27),
+  },
+  {
+    id: 'demo-10',
+    type: 'link',
+    title: 'A cabin above the Dolomites',
+    url: 'https://www.instagram.com/p/demotravel',
+    summary:
+      'Larch-clad rifugio with a wall of glass over the valley. Bookmarked for the someday-trip list — reachable by cable car, open in shoulder season.',
+    tags: ['travel', 'places', 'mountains'],
+    thumbnailUrl:
+      'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1200&q=80',
+    platform: 'instagram',
+    createdAt: daysAgo(51),
+  },
+  {
+    id: 'demo-11',
+    type: 'link',
+    title: 'No-knead overnight focaccia',
+    url: 'https://example.com/overnight-focaccia',
+    summary:
+      'Mix at night, dimple and bake in the morning. Olive oil, flaky salt, and whatever herbs are wilting in the fridge. Saved during last winter’s baking phase.',
+    tags: ['cooking', 'recipe', 'baking'],
+    thumbnailUrl:
+      'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=1200&q=80',
+    platform: 'article',
+    createdAt: daysAgo(74),
+  },
+  {
+    id: 'demo-12',
+    type: 'text',
+    title: 'Idea: a weekly “memory lane” recap',
+    summary:
+      'What if Sunday morning surfaced a small reel of everything you saved that week — a gentle recap instead of a firehose? Could become the heart of Daymark.',
+    note: 'Product idea — revisit',
+    tags: ['idea', 'product', 'daymark'],
+    platform: 'note',
+    createdAt: daysAgo(16),
+  },
+  {
+    id: 'demo-13',
+    type: 'link',
+    title: 'Warm brutalist interiors',
+    url: 'https://www.instagram.com/p/demointerior',
+    summary:
+      'Raw concrete softened with oak, linen and low amber light. Mood reference for the someday studio — save the palette, not just the pretty picture.',
+    tags: ['design', 'interior', 'mood'],
+    thumbnailUrl:
+      'https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?w=1200&q=80',
+    platform: 'instagram',
+    createdAt: daysAgo(39),
   },
 ]
 

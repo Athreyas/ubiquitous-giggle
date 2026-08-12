@@ -1,49 +1,55 @@
+import { motion } from 'motion/react'
 import type { MemoryItem } from '../types'
 import { humanAge } from '../lib/selection'
-import { platformLabel } from '../lib/platform'
+import { PlatformBadge } from './PlatformBadge'
 
 interface Props {
   item: MemoryItem
+  index?: number
   onOpen: (item: MemoryItem) => void
-  onDismiss: (item: MemoryItem) => void
 }
 
-export function MemoryCard({ item, onOpen, onDismiss }: Props) {
+export function MemoryCard({ item, index = 0, onOpen }: Props) {
   return (
-    <article className="memory-card">
-      <div className="memory-media" aria-hidden={!item.thumbnailUrl}>
-        <span className="memory-platform">{platformLabel(item.platform)}</span>
+    <motion.article
+      className="mcard"
+      layoutId={`card-${item.id}`}
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: Math.min(index * 0.045, 0.4), ease: [0.22, 1, 0.36, 1] }}
+      whileHover={{ y: -6 }}
+      onClick={() => onOpen(item)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen(item)
+        }
+      }}
+    >
+      <div className={`mcard-media ${item.thumbnailUrl ? '' : 'noimg'}`}>
+        <PlatformBadge platform={item.platform} />
         {item.thumbnailUrl ? (
           <img src={item.thumbnailUrl} alt="" loading="lazy" />
-        ) : null}
+        ) : (
+          <span className="mcard-noimg-glyph">{item.title.slice(0, 1)}</span>
+        )}
       </div>
-      <div className="memory-body">
-        <p className="memory-age">{humanAge(item)}</p>
-        <h2>{item.title}</h2>
-        <p className="memory-summary">{item.summary}</p>
-        {item.note ? <p className="memory-note">Your note: {item.note}</p> : null}
+      <div className="mcard-body">
+        <p className="mcard-age">{humanAge(item)}</p>
+        <h3>{item.title}</h3>
+        <p className="mcard-summary">{item.summary}</p>
         {item.tags.length > 0 ? (
-          <div className="tag-row">
-            {item.tags.slice(0, 6).map((tag) => (
+          <div className="mcard-tags">
+            {item.tags.slice(0, 3).map((tag) => (
               <span className="tag" key={tag}>
                 {tag}
               </span>
             ))}
           </div>
         ) : null}
-        <div className="memory-actions">
-          <button type="button" className="btn-primary" onClick={() => onOpen(item)}>
-            {item.url ? 'Open again' : 'Read note'}
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => onDismiss(item)}
-          >
-            Not today
-          </button>
-        </div>
       </div>
-    </article>
+    </motion.article>
   )
 }
