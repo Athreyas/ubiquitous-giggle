@@ -438,8 +438,12 @@ function loadSurfacingState(db: DatabaseClient['db'], userId: string): Surfacing
     return defaultSurfacingState()
   }
 
-  const parsed = surfacingStateSchema.safeParse(JSON.parse(row.stateJson))
-  return parsed.success ? parsed.data : defaultSurfacingState()
+  try {
+    const parsed = surfacingStateSchema.safeParse(JSON.parse(row.stateJson))
+    return parsed.success ? parsed.data : defaultSurfacingState()
+  } catch {
+    return defaultSurfacingState()
+  }
 }
 
 function saveSurfacingState(db: DatabaseClient['db'], userId: string, state: SurfacingState): void {
