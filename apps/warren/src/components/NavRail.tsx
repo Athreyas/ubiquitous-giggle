@@ -33,7 +33,7 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo, signedIn }: 
           <button
             key={key}
             type="button"
-            className={`nav-item ${active === key ? 'active' : ''}`}
+            className={`nav-item relative ${active === key ? 'active' : ''}`}
             onClick={() => onNavigate(key)}
             aria-current={active === key ? 'page' : undefined}
           >
