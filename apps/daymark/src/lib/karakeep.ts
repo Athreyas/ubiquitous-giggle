@@ -80,6 +80,83 @@ function toMemoryItem(b: KarakeepBookmark, baseUrl: string): MemoryItem {
   }
 }
 
+export interface PushProgress {
+  done: number
+  total: number
+  created: number
+  duplicates: number
+  failed: number
+}
+
+/** Build the POST /api/v1/bookmarks body for a Daymark item. */
+export function toCreateBookmarkPayload(item: MemoryItem): Record<string, unknown> {
+  const common = {
+    title: item.title,
+    createdAt: item.createdAt,
+    source: 'api' as const,
+  }
+  if (item.type === 'text' || !item.url) {
+    return { ...common, type: 'text', text: item.summary || item.note || item.title }
+  }
+  return { ...common, type: 'link', url: item.url }
+}
+
+/**
+ * Push imported items into a connected Daykeep/Karakeep library.
+ * Creates each bookmark then attaches its tags. Best-effort: per-item errors
+ * are counted, not thrown, so a bad row can't abort the whole import.
+ */
+export async function pushBookmarksToKarakeep(
+  baseUrl: string,
+  apiKey: string,
+  items: MemoryItem[],
+  onProgress?: (p: PushProgress) => void,
+): Promise<PushProgress> {
+  const root = baseUrl.replace(/\/$/, '')
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  }
+  const progress: PushProgress = {
+    done: 0,
+    total: items.length,
+    created: 0,
+    duplicates: 0,
+    failed: 0,
+  }
+
+  for (const item of items) {
+    try {
+      const res = await fetch(`${root}/api/v1/bookmarks`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(toCreateBookmarkPayload(item)),
+      })
+      if (!res.ok) {
+        progress.failed++
+      } else {
+        if (res.status === 200) progress.duplicates++
+        else progress.created++
+        const created = (await res.json()) as { id?: string }
+        if (created.id && item.tags.length) {
+          await fetch(`${root}/api/v1/bookmarks/${created.id}/tags`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ tags: item.tags.map((tagName) => ({ tagName })) }),
+          }).catch(() => undefined)
+        }
+      }
+    } catch {
+      progress.failed++
+    }
+    progress.done++
+    onProgress?.({ ...progress })
+  }
+
+  return progress
+}
+
 export async function fetchKarakeepBookmarks(
   baseUrl: string,
   apiKey: string,
