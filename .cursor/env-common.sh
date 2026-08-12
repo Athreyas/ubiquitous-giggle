@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helper: put the repo-pinned Node (see daykeep/.nvmrc = 24) and pnpm on PATH.
+# Shared helper: put Node 24 on PATH for Cloud Agent shells.
 #
 # The Cursor cloud exec-daemon prepends its own Node (v22) shim to PATH for every
 # command it runs, which would otherwise shadow the version we want. We therefore
@@ -18,7 +18,3 @@ if command -v nvm >/dev/null 2>&1; then
     export PATH
   fi
 fi
-
-# Daykeep's config parser only accepts the strings "true"/"false" for boolean
-# env vars; the cloud runtime exports NO_COLOR=1, which fails validation.
-export NO_COLOR=false

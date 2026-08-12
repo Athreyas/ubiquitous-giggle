@@ -1,36 +1,37 @@
-# Daykeep + Daymark
+# Daymark
 
-Private second-brain stack:
+Daymark is a living-memory app for things you save and almost forget — a daily resurfacing overlay plus a calm library for links, notes, screenshots, and imports.
 
 | Piece | Role |
 |-------|------|
-| **Daykeep** (`daykeep/`) | Soft-fork of [Karakeep](https://github.com/karakeep-app/karakeep) — capture, auth, search, AI tags. UI rebranded; AGPL attribution kept. |
-| **Daymark** (`apps/daymark/`) | **USP** — daily memory overlay that resurfaces forgotten saves |
-| **Deploy** (`deploy/`) | Docker Compose for the library backend |
+| **Daymark** (`apps/daymark/`) | Vite + React client — Memories, Library, Capture, Import |
+| **API** (`apps/api/`) | Hono + Drizzle sync backend — auth, saves, surfacing state |
+| **Docs** (`docs/`) | Product plans and UI inspiration notes |
 
-## Demo screenshots
-
-See [`docs/demo/`](docs/demo/) — Today's memory overlay, shuffle, library grid, connect settings.
-
-## Legal
-
-Daykeep is based on Karakeep (AGPL-3.0). See [`daykeep/LICENSE`](daykeep/LICENSE) and [`daykeep/ATTRIBUTION.md`](daykeep/ATTRIBUTION.md).  
-Daykeep / Daymark branding is independent — this is not an official Karakeep product.
-
-## Run Daymark demo
+## Quick start (demo, offline)
 
 ```bash
 cd apps/daymark && npm install && npm run dev
 ```
 
-## GitHub push
+Open `http://127.0.0.1:5173/` — demo library works with no backend.
 
-This cloud environment has **no GitHub credentials**. To publish:
+## Full local stack (synced library)
 
 ```bash
-export GH_TOKEN=ghp_your_token   # repo + workflow scopes
-gh auth login --with-token <<< "$GH_TOKEN"
-gh repo create daykeep --private --source=. --remote=origin --push
+# Terminal 1 — API (default http://127.0.0.1:8787)
+cd apps/api && npm install && npm run dev
+
+# Terminal 2 — client
+cd apps/daymark && npm install && npm run dev
 ```
 
-Or reconnect this agent from a Cursor surface with GitHub linked.
+In Settings, turn off demo mode, register/sign in, and saves + surfacing state sync through the API.
+
+## License
+
+MIT — see [`LICENSE`](./LICENSE).
+
+## Cloud Agent notes
+
+See [`AGENTS.md`](./AGENTS.md) for Cursor Cloud specifics. Install/bootstrap lives in [`.cursor/install.sh`](./.cursor/install.sh).

@@ -1,11 +1,16 @@
-# Phase 0 — Deploy stock Karakeep
+# Daymark deploy notes
+
+The previous AGPL Docker library stack has been removed.
+
+## Local development (recommended)
 
 ```bash
-cd deploy
-cp .env.example .env
-openssl rand -base64 36   # NEXTAUTH_SECRET
-openssl rand -base64 36   # MEILI_MASTER_KEY
-docker compose up -d
+cd apps/api && npm install && npm run dev     # http://127.0.0.1:8787
+cd apps/daymark && npm install && npm run dev # http://127.0.0.1:5173
 ```
 
-Then open Daymark (`apps/daymark`), disable demo mode, and paste your Karakeep URL + API key (Settings → API Keys).
+## Production
+
+Containerize `apps/api` (Node 24) with a mounted volume for SQLite, or point
+Drizzle at Postgres when ready. A Compose file for production will land with
+the hardened cloud-sync epic; until then use the local API.
