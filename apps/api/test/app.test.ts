@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 
 import { createApp } from '../src/app.js'
 import { createDatabase, type DatabaseClient } from '../src/db.js'
+import { enrichmentJobs, spaces } from '../src/schema.js'
 
 interface AuthBody {
   user: {
@@ -18,8 +20,12 @@ interface AuthBody {
 
 interface MemoryItemBody {
   id: string
+  type?: string
   title: string
   url?: string
+  tags?: string[]
+  thumbnailUrl?: string
+  archived?: boolean
 }
 
 type HeaderMap = Record<string, string>
@@ -31,7 +37,7 @@ let tempDir: string
 beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'daymark-api-'))
   database = createDatabase(join(tempDir, 'test.sqlite'))
-  app = createApp({ database })
+  app = createApp({ database, assetRoot: join(tempDir, 'assets'), enableEnrichmentWorker: false })
 })
 
 afterEach(() => {
@@ -49,6 +55,9 @@ describe('auth', () => {
       name: 'Reader',
     })
     expect(registered.body.token).toMatch(/^[a-f0-9]{64}$/)
+    expect(registered.response.headers.get('set-cookie')).toContain(
+      'warren_session=' + registered.body.token + '; HttpOnly; Path=/; SameSite=Lax',
+    )
 
     const me = await app.request('/api/v1/auth/me', {
       headers: authHeaders(registered.body.token),
@@ -76,10 +85,40 @@ describe('auth', () => {
       body: JSON.stringify({ email: 'reader@example.com', password: 'correct-horse' }),
     })
     expect(login.status).toBe(200)
-    await expect(login.json()).resolves.toMatchObject({
+    const loginCookie = login.headers.get('set-cookie')
+    const loggedIn = (await login.json()) as AuthBody
+    expect(loggedIn).toMatchObject({
       user: { email: 'reader@example.com' },
       token: expect.stringMatching(/^[a-f0-9]{64}$/),
     })
+    expect(loginCookie).toContain(
+      'warren_session=' + loggedIn.token + '; HttpOnly; Path=/; SameSite=Lax',
+    )
+
+    const cookieMe = await app.request('/api/v1/auth/me', {
+      headers: { cookie: cookieHeader(loginCookie) },
+    })
+    expect(cookieMe.status).toBe(200)
+    await expect(cookieMe.json()).resolves.toMatchObject({
+      email: 'reader@example.com',
+      name: 'Reader',
+    })
+  })
+
+  it('seeds default spaces when registering', async () => {
+    const { body: registered } = await register('spaces@example.com')
+
+    const seeded = database.db
+      .select()
+      .from(spaces)
+      .where(eq(spaces.userId, registered.user.id))
+      .all()
+
+    expect(seeded.map((space) => [space.name, space.slug, space.position])).toEqual([
+      ['Personal', 'personal', 0],
+      ['Work', 'work', 1],
+      ['Learning', 'learning', 2],
+    ])
   })
 })
 
@@ -114,9 +153,16 @@ describe('saves', () => {
       headers: authHeaders(registered.token),
     })
     expect(list.status).toBe(200)
+    const etag = list.headers.get('etag')
+    expect(etag).toMatch(/^"saves-[a-f0-9]{16}"$/)
     await expect(list.json()).resolves.toMatchObject({
       items: [expect.objectContaining({ id: created.id, title: 'SQLite patterns' })],
     })
+
+    const unchangedList = await app.request('/api/v1/saves?limit=10', {
+      headers: { ...authHeaders(registered.token), 'if-none-match': etag ?? '' },
+    })
+    expect(unchangedList.status).toBe(304)
 
     const fetched = await app.request(`/api/v1/saves/${created.id}`, {
       headers: authHeaders(registered.token),
@@ -185,6 +231,72 @@ describe('saves', () => {
       tags: ['notes', 'edited'],
     })
   })
+
+  it('enqueues an enrichment job when creating a save', async () => {
+    const { body: registered } = await register('enrich@example.com')
+    const create = await postJson('/api/v1/saves', registered.token, {
+      type: 'text',
+      title: 'Notebook',
+      summary: 'A captured thought about local search.',
+      tags: ['notes'],
+      platform: 'note',
+    })
+    expect(create.status).toBe(201)
+    const created = (await create.json()) as MemoryItemBody
+
+    const job = database.db
+      .select()
+      .from(enrichmentJobs)
+      .where(eq(enrichmentJobs.saveId, created.id))
+      .get()
+    expect(job).toMatchObject({
+      saveId: created.id,
+      status: 'pending',
+      attempts: 0,
+    })
+
+    const status = await app.request(`/api/v1/enrichment/${created.id}`, {
+      headers: authHeaders(registered.token),
+    })
+    expect(status.status).toBe(200)
+    await expect(status.json()).resolves.toMatchObject({
+      saveId: created.id,
+      status: 'pending',
+    })
+  })
+
+  it('uploads an authenticated asset save and serves its bytes', async () => {
+    const { body: registered } = await register('assets@example.com')
+    const form = new FormData()
+    form.set('file', new File(['hello asset'], 'hello.txt', { type: 'text/plain' }))
+    form.set('title', 'hello.txt')
+    form.set('note', 'Asset note')
+    form.set('tags', 'asset,upload')
+
+    const upload = await app.request('/api/v1/saves/upload', {
+      method: 'POST',
+      headers: authHeaders(registered.token),
+      body: form,
+    })
+
+    expect(upload.status).toBe(201)
+    const uploaded = (await upload.json()) as MemoryItemBody
+    expect(uploaded).toMatchObject({
+      id: expect.stringMatching(/^sav_/),
+      type: 'asset',
+      title: 'hello.txt',
+      url: `/api/v1/assets/${uploaded.id}`,
+      thumbnailUrl: `/api/v1/assets/${uploaded.id}`,
+      tags: ['asset', 'upload'],
+    })
+
+    const asset = await app.request(`/api/v1/assets/${uploaded.id}`, {
+      headers: authHeaders(registered.token),
+    })
+    expect(asset.status).toBe(200)
+    expect(asset.headers.get('content-type')).toContain('text/plain')
+    await expect(asset.text()).resolves.toBe('hello asset')
+  })
 })
 
 async function register(email: string) {
@@ -202,6 +314,11 @@ function authHeaders(token: string): HeaderMap {
 
 function jsonAuthHeaders(token: string): HeaderMap {
   return { ...authHeaders(token), 'content-type': 'application/json' }
+}
+
+function cookieHeader(setCookie: string | null): string {
+  expect(setCookie).toBeTruthy()
+  return setCookie?.split(';')[0] ?? ''
 }
 
 async function postJson(path: string, token: string, body: unknown): Promise<Response> {

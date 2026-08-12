@@ -24,6 +24,7 @@ export const loginSchema = z.object({
 
 export const createSaveSchema = z.object({
   id: z.string().trim().min(1).max(128).optional(),
+  spaceId: z.string().trim().min(1).max(128).nullable().optional(),
   type: bookmarkTypeSchema,
   title: z.string().trim().min(1).max(500),
   url: z.string().trim().url().optional(),

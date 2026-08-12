@@ -1,4 +1,6 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
 import { and, desc, eq, lt, type SQL } from 'drizzle-orm'
 import { Hono, type Context } from 'hono'
@@ -9,7 +11,7 @@ import type { z } from 'zod'
 
 import { createToken, hashPassword, hashToken, tokenExpiry, verifyPassword } from './auth.js'
 import { createDatabase, type DatabaseClient } from './db.js'
-import { saves, surfacingState, tokens, users, type Save, type User } from './schema.js'
+import { enrichmentJobs, saves, spaces, surfacingState, tokens, users, type EnrichmentJob, type Save, type User } from './schema.js'
 import {
   batchSavesSchema,
   createSaveSchema,
@@ -24,6 +26,13 @@ import {
 } from './validation.js'
 
 const allowedOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173'])
+const sessionCookieName = 'warren_session'
+const defaultAssetRoot = () => resolve(process.cwd(), '.data/assets')
+const defaultSpaces = [
+  { name: 'Personal', slug: 'personal', position: 0 },
+  { name: 'Work', slug: 'work', position: 1 },
+  { name: 'Learning', slug: 'learning', position: 2 },
+] as const
 
 const defaultSurfacingState = (): SurfacingState => ({
   byDay: {},
@@ -63,11 +72,16 @@ type AppEnv = {
 
 interface CreateAppOptions {
   database?: DatabaseClient
+  assetRoot?: string
+  enableEnrichmentWorker?: boolean
 }
 
 export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
   const database = options.database ?? createDatabase()
   const { db } = database
+  const assetRoot = options.assetRoot ?? defaultAssetRoot()
+  const enableEnrichmentWorker = options.enableEnrichmentWorker ?? true
+  let enrichmentScheduled = false
   const app = new Hono<AppEnv>()
 
   app.use(
@@ -76,6 +90,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
       origin: (origin) => (allowedOrigins.has(origin) ? origin : undefined),
       allowHeaders: ['Authorization', 'Content-Type'],
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      credentials: true,
     }),
   )
 
@@ -91,11 +106,12 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
   const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
     const header = c.req.header('authorization') ?? ''
     const match = /^Bearer\s+(.+)$/i.exec(header)
-    if (!match) {
-      throw new HTTPException(401, { message: 'Bearer token required.' })
+    const token = match?.[1] ?? parseCookies(c.req.header('cookie'))[sessionCookieName]
+    if (!token) {
+      throw new HTTPException(401, { message: 'Bearer token or session cookie required.' })
     }
 
-    const tokenHash = hashToken(match[1])
+    const tokenHash = hashToken(token)
     const tokenRow = db.select().from(tokens).where(eq(tokens.tokenHash, tokenHash)).get()
     if (!tokenRow) {
       throw new HTTPException(401, { message: 'Invalid token.' })
@@ -116,6 +132,35 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     await next()
   })
 
+  function enqueueEnrichment(saveId: string): void {
+    const now = new Date().toISOString()
+    db.insert(enrichmentJobs)
+      .values({
+        id: `enj_${randomUUID()}`,
+        saveId,
+        status: 'pending',
+        attempts: 0,
+        lastError: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    scheduleEnrichment()
+  }
+
+  function scheduleEnrichment(): void {
+    if (!enableEnrichmentWorker || enrichmentScheduled) {
+      return
+    }
+
+    enrichmentScheduled = true
+    queueMicrotask(() => {
+      void processPendingEnrichmentJobs(database).finally(() => {
+        enrichmentScheduled = false
+      })
+    })
+  }
+
   app.get('/health', (c) => c.json({ ok: true }))
 
   app.post('/api/v1/auth/register', async (c) => {
@@ -131,15 +176,29 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     const token = createToken()
 
     try {
-      db.insert(users).values(user).run()
-      db.insert(tokens)
-        .values({
-          tokenHash: hashToken(token),
-          userId: user.id,
-          expiresAt: tokenExpiry(),
-          createdAt: now,
-        })
-        .run()
+      db.transaction((tx) => {
+        tx.insert(users).values(user).run()
+        tx.insert(tokens)
+          .values({
+            tokenHash: hashToken(token),
+            userId: user.id,
+            expiresAt: tokenExpiry(),
+            createdAt: now,
+          })
+          .run()
+        tx.insert(spaces)
+          .values(
+            defaultSpaces.map((space) => ({
+              id: `spc_${randomUUID()}`,
+              userId: user.id,
+              name: space.name,
+              slug: space.slug,
+              position: space.position,
+              createdAt: now,
+            })),
+          )
+          .run()
+      })
     } catch (error) {
       if (isUniqueConstraint(error)) {
         throw new HTTPException(409, { message: 'Email is already registered.' })
@@ -147,6 +206,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
       throw error
     }
 
+    setSessionCookie(c, token)
     return c.json({ user: toPublicUser(user), token }, 201)
   })
 
@@ -167,18 +227,45 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
       })
       .run()
 
+    setSessionCookie(c, token)
     return c.json({ user: toPublicUser(user), token })
   })
 
   app.post('/api/v1/auth/logout', requireAuth, (c) => {
     db.delete(tokens).where(eq(tokens.tokenHash, c.get('tokenHash'))).run()
+    clearSessionCookie(c)
     return c.body(null, 204)
   })
 
   app.get('/api/v1/auth/me', requireAuth, (c) => c.json(c.get('user')))
 
+  app.get('/api/v1/assets/:id', requireAuth, (c) => {
+    const row = getSaveForUser(db, c.get('user').id, c.req.param('id'))
+    if (!row || row.type !== 'asset') {
+      throw new HTTPException(404, { message: 'Asset not found.' })
+    }
+
+    const path = assetPathFor(assetRoot, c.get('user').id, row.id)
+    if (!existsSync(path)) {
+      throw new HTTPException(404, { message: 'Asset not found.' })
+    }
+
+    return new Response(new Uint8Array(readFileSync(path)), {
+      headers: {
+        'Cache-Control': 'private, max-age=3600',
+        'Content-Type': contentTypeForTitle(row.title),
+      },
+    })
+  })
+
   app.get('/api/v1/saves', requireAuth, (c) => {
     const user = c.get('user')
+    const etag = buildSavesEtag(database, user.id)
+    c.header('ETag', etag)
+    if (etagMatches(c.req.header('if-none-match'), etag)) {
+      return c.body(null, 304)
+    }
+
     const limit = parseLimit(c.req.query('limit'))
     const cursor = c.req.query('cursor')
     const archived = c.req.query('archived') ?? 'false'
@@ -209,6 +296,46 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     const row = buildSaveInsert(c.get('user').id, input)
 
     db.insert(saves).values(row).run()
+    enqueueEnrichment(row.id)
+
+    return c.json(toMemoryItem(row), 201)
+  })
+
+  app.post('/api/v1/saves/upload', requireAuth, async (c) => {
+    const body = await c.req.parseBody()
+    const file = firstFile(body.file)
+    if (!file) {
+      throw new HTTPException(400, { message: 'Multipart field "file" is required.' })
+    }
+
+    const user = c.get('user')
+    const id = mintSaveId()
+    const assetPath = assetPathFor(assetRoot, user.id, id)
+    mkdirSync(join(assetRoot, user.id), { recursive: true })
+    writeFileSync(assetPath, Buffer.from(await file.arrayBuffer()))
+
+    const note = firstString(body.note)
+    const row: Save = {
+      id,
+      userId: user.id,
+      spaceId: null,
+      type: 'asset',
+      title: firstString(body.title) ?? file.name ?? 'Uploaded asset',
+      url: `/api/v1/assets/${id}`,
+      summary: note ?? '',
+      note: note ?? null,
+      tagsJson: JSON.stringify(parseUploadTags(body.tags)),
+      thumbnailUrl: `/api/v1/assets/${id}`,
+      platform: 'other',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      archived: 0,
+      extractedText: null,
+      keywordsJson: null,
+    }
+
+    db.insert(saves).values(row).run()
+    enqueueEnrichment(row.id)
 
     return c.json(toMemoryItem(row), 201)
   })
@@ -244,6 +371,9 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
 
       return { created, updated, ids }
     })
+    for (const id of result.ids) {
+      enqueueEnrichment(id)
+    }
 
     return c.json(result)
   })
@@ -283,6 +413,25 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     }
 
     return c.body(null, 204)
+  })
+
+  app.get('/api/v1/enrichment/:saveId', requireAuth, (c) => {
+    const save = getSaveForUser(db, c.get('user').id, c.req.param('saveId'))
+    if (!save) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+
+    const job = db
+      .select()
+      .from(enrichmentJobs)
+      .where(eq(enrichmentJobs.saveId, save.id))
+      .orderBy(desc(enrichmentJobs.createdAt))
+      .get()
+    if (!job) {
+      throw new HTTPException(404, { message: 'Enrichment job not found.' })
+    }
+
+    return c.json(toEnrichmentStatus(job))
   })
 
   app.get('/api/v1/surfacing', requireAuth, (c) => {
@@ -338,6 +487,114 @@ async function readJson<T extends z.ZodTypeAny>(c: Context, schema: T): Promise<
   return parsed.data
 }
 
+function setSessionCookie(c: Context, token: string): void {
+  const attributes = [`${sessionCookieName}=${token}`, 'HttpOnly', 'Path=/', 'SameSite=Lax']
+  if (process.env.NODE_ENV === 'production') {
+    attributes.push('Secure')
+  }
+  c.header('Set-Cookie', attributes.join('; '))
+}
+
+function clearSessionCookie(c: Context): void {
+  const attributes = [`${sessionCookieName}=`, 'HttpOnly', 'Path=/', 'SameSite=Lax', 'Max-Age=0']
+  if (process.env.NODE_ENV === 'production') {
+    attributes.push('Secure')
+  }
+  c.header('Set-Cookie', attributes.join('; '))
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  if (!header) {
+    return {}
+  }
+
+  const cookies: Record<string, string> = {}
+  for (const segment of header.split(';')) {
+    const [rawName, ...rawValue] = segment.trim().split('=')
+    if (!rawName || rawValue.length === 0) {
+      continue
+    }
+
+    cookies[rawName] = decodeURIComponent(rawValue.join('='))
+  }
+  return cookies
+}
+
+function buildSavesEtag(database: DatabaseClient, userId: string): string {
+  const row = database.sqlite
+    .prepare('SELECT COALESCE(MAX(updated_at), "") AS max_updated_at FROM saves WHERE user_id = ?')
+    .get(userId) as { max_updated_at: string }
+  const digest = createHash('sha256').update(`${userId}:${row.max_updated_at}`).digest('hex').slice(0, 16)
+  return `"saves-${digest}"`
+}
+
+function etagMatches(header: string | undefined, etag: string): boolean {
+  if (!header) {
+    return false
+  }
+  return header
+    .split(',')
+    .map((value) => value.trim())
+    .includes(etag)
+}
+
+type MultipartValue = string | File | Array<string | File> | undefined
+
+function firstFile(value: MultipartValue): File | undefined {
+  if (Array.isArray(value)) {
+    return value.find((item): item is File => item instanceof File)
+  }
+  return value instanceof File ? value : undefined
+}
+
+function firstString(value: MultipartValue): string | undefined {
+  const raw = Array.isArray(value) ? value.find((item): item is string => typeof item === 'string') : value
+  if (typeof raw !== 'string') {
+    return undefined
+  }
+  const trimmed = raw.trim()
+  return trimmed ? trimmed : undefined
+}
+
+function parseUploadTags(value: MultipartValue): string[] {
+  const rawValues = Array.isArray(value) ? value : value === undefined ? [] : [value]
+  const tags = rawValues.flatMap((item) => {
+    if (typeof item !== 'string') {
+      return []
+    }
+    const trimmed = item.trim()
+    if (!trimmed) {
+      return []
+    }
+    try {
+      const parsed: unknown = JSON.parse(trimmed)
+      if (Array.isArray(parsed)) {
+        return parsed.filter((tag): tag is string => typeof tag === 'string')
+      }
+    } catch {
+      // Fall through to comma-separated parsing.
+    }
+    return trimmed.split(',')
+  })
+
+  return unique(tags.map((tag) => tag.trim()).filter(Boolean))
+}
+
+function assetPathFor(assetRoot: string, userId: string, id: string): string {
+  return join(assetRoot, userId, id)
+}
+
+function contentTypeForTitle(title: string): string {
+  const lower = title.toLowerCase()
+  if (lower.endsWith('.png')) return 'image/png'
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.gif')) return 'image/gif'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.pdf')) return 'application/pdf'
+  if (lower.endsWith('.txt') || lower.endsWith('.md')) return 'text/plain; charset=utf-8'
+  return 'application/octet-stream'
+}
+
 function toPublicUser(user: User): PublicUser {
   return {
     id: user.id,
@@ -351,6 +608,7 @@ function buildSaveInsert(userId: string, input: CreateSaveInput): Save {
   return {
     id: input.id ?? mintSaveId(),
     userId,
+    spaceId: input.spaceId ?? null,
     type: input.type,
     title: input.title,
     url: input.url ?? null,
@@ -373,6 +631,7 @@ function buildSaveUpdate(
   createdAt: string,
 ): Partial<Save> {
   return {
+    ...(input.spaceId !== undefined ? { spaceId: input.spaceId } : {}),
     ...(input.type !== undefined ? { type: input.type } : {}),
     ...(input.title !== undefined ? { title: input.title } : {}),
     ...(input.url !== undefined ? { url: input.url } : {}),
@@ -405,6 +664,168 @@ function toMemoryItem(row: Save): MemoryItem {
     ...(row.extractedText ? { extractedText: row.extractedText } : {}),
     ...(row.keywordsJson ? { keywords: parseStringArray(row.keywordsJson) } : {}),
   }
+}
+
+function toEnrichmentStatus(job: EnrichmentJob) {
+  return {
+    id: job.id,
+    saveId: job.saveId,
+    status: job.status,
+    attempts: job.attempts,
+    ...(job.lastError ? { lastError: job.lastError } : {}),
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  }
+}
+
+async function processPendingEnrichmentJobs(database: DatabaseClient): Promise<void> {
+  const { db } = database
+
+  for (let index = 0; index < 5; index += 1) {
+    const job = db
+      .select()
+      .from(enrichmentJobs)
+      .where(eq(enrichmentJobs.status, 'pending'))
+      .orderBy(desc(enrichmentJobs.createdAt))
+      .get()
+    if (!job) {
+      return
+    }
+
+    const runningAt = new Date().toISOString()
+    db.update(enrichmentJobs)
+      .set({
+        status: 'running',
+        attempts: job.attempts + 1,
+        lastError: null,
+        updatedAt: runningAt,
+      })
+      .where(eq(enrichmentJobs.id, job.id))
+      .run()
+
+    try {
+      const save = db.select().from(saves).where(eq(saves.id, job.saveId)).get()
+      if (!save) {
+        throw new Error('Save no longer exists.')
+      }
+
+      const result = await enrichSave(save)
+      const existingTags = parseStringArray(save.tagsJson)
+      const mergedTags = unique([...existingTags, ...result.keywords])
+      db.update(saves)
+        .set({
+          tagsJson: JSON.stringify(mergedTags),
+          extractedText: result.extractedText || save.extractedText,
+          keywordsJson: JSON.stringify(result.keywords),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(saves.id, save.id))
+        .run()
+
+      db.update(enrichmentJobs)
+        .set({
+          status: 'done',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(enrichmentJobs.id, job.id))
+        .run()
+    } catch (error) {
+      db.update(enrichmentJobs)
+        .set({
+          status: 'failed',
+          lastError: error instanceof Error ? error.message.slice(0, 500) : 'Unknown enrichment error.',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(enrichmentJobs.id, job.id))
+        .run()
+    }
+  }
+}
+
+async function enrichSave(save: Save): Promise<{ extractedText: string; keywords: string[] }> {
+  const parts = [save.title, save.summary, save.note, save.extractedText].filter((part): part is string => Boolean(part))
+
+  if (save.type === 'link' && save.url?.startsWith('http')) {
+    const html = await fetchText(save.url)
+    parts.push(extractHtmlText(html))
+  }
+
+  const extractedText = parts.join('\n\n').slice(0, 200_000)
+  return {
+    extractedText,
+    keywords: topKeywords(extractedText, 5),
+  }
+}
+
+async function fetchText(url: string): Promise<string> {
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Daymark API enrichment stub',
+    },
+    signal: AbortSignal.timeout(2500),
+  })
+  if (!response.ok) {
+    throw new Error(`Fetch failed with status ${response.status}.`)
+  }
+  return (await response.text()).slice(0, 200_000)
+}
+
+function extractHtmlText(html: string): string {
+  const title = matchFirst(html, /<title[^>]*>([\s\S]*?)<\/title>/i)
+  const description = matchFirst(html, /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["'][^>]*>/i)
+  const body = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return [title, description, body].filter(Boolean).map(decodeHtmlEntities).join('\n\n')
+}
+
+function matchFirst(value: string, pattern: RegExp): string {
+  return pattern.exec(value)?.[1]?.trim() ?? ''
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
+
+const keywordStopWords = new Set([
+  'and',
+  'are',
+  'but',
+  'for',
+  'from',
+  'has',
+  'have',
+  'into',
+  'not',
+  'that',
+  'the',
+  'this',
+  'with',
+  'you',
+  'your',
+])
+
+function topKeywords(text: string, limit: number): string[] {
+  const counts = new Map<string, number>()
+  for (const word of text.toLowerCase().match(/[a-z0-9][a-z0-9-]{2,}/g) ?? []) {
+    if (keywordStopWords.has(word)) {
+      continue
+    }
+    counts.set(word, (counts.get(word) ?? 0) + 1)
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, limit)
+    .map(([word]) => word)
 }
 
 function parseStringArray(raw: string | null): string[] {
