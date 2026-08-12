@@ -1,31 +1,19 @@
 import type { LibrarySettings, MemoryItem } from '../types'
 import { listSaves, type Save } from './api/saves'
-import { detectPlatform } from './platform'
 
-function pickTitle(save: Save): string {
-  return save.title?.trim() || save.url?.trim() || 'Untitled save'
-}
-
-function pickSummary(save: Save): string {
-  const summary = save.summary?.trim()
-  if (summary) return summary
-  const note = save.note?.trim()
-  if (note) return note
-  return 'No summary yet — open it and leave a short note for future you.'
-}
+const NO_SUMMARY_YET = 'No summary yet — open it and leave a short note for future you.'
 
 function toMemoryItem(save: Save): MemoryItem {
-  const url = save.url?.trim() || undefined
   return {
     id: save.id,
     type: save.type,
-    title: pickTitle(save),
-    url,
-    summary: pickSummary(save),
-    note: save.note?.trim() || undefined,
+    title: save.title,
+    url: save.url,
+    summary: save.summary?.trim() || save.note?.trim() || NO_SUMMARY_YET,
+    note: save.note,
     tags: save.tags ?? [],
-    thumbnailUrl: save.thumbnailUrl?.trim() || undefined,
-    platform: detectPlatform(url, save.type),
+    thumbnailUrl: save.thumbnailUrl,
+    platform: save.platform,
     createdAt: save.createdAt,
     archived: Boolean(save.archived),
   }
@@ -37,7 +25,7 @@ export async function fetchLibrarySaves(
   limit = 200,
 ): Promise<MemoryItem[]> {
   const items: MemoryItem[] = []
-  let cursor: string | null = null
+  let cursor: string | undefined
 
   while (items.length < limit) {
     const { items: page, nextCursor } = await listSaves(settings, {
@@ -46,7 +34,7 @@ export async function fetchLibrarySaves(
       cursor,
     })
     for (const save of page) items.push(toMemoryItem(save))
-    cursor = nextCursor ?? null
+    cursor = nextCursor
     if (!cursor || page.length === 0) break
   }
 

@@ -43,12 +43,10 @@ function isLegacySettings(raw: unknown): raw is LegacySettings {
 }
 
 function migrateLegacySettings(legacy: LegacySettings): LibrarySettings {
-  const apiBaseUrl = legacy.baseUrl?.trim() || DEFAULT_API_BASE_URL
-  const token = legacy.apiKey?.trim() || ''
   return {
-    apiBaseUrl,
-    token,
-    useDemo: legacy.useDemo ?? token === '',
+    apiBaseUrl: legacy.baseUrl?.trim() || DEFAULT_API_BASE_URL,
+    token: legacy.apiKey?.trim() || '',
+    useDemo: legacy.useDemo ?? true,
   }
 }
 
