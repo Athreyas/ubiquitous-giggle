@@ -131,6 +131,34 @@ export const GlyphDoc = (p: P) => (
   </svg>
 )
 
+export const GlyphImage = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+    <circle cx="9" cy="10" r="1.8" />
+    <path d="M4 17l4.5-4.5 3.5 3.5 3-3 5 5" />
+  </svg>
+)
+
+export const IconPlus = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="4" y="4" width="16" height="16" rx="4" />
+    <path d="M12 8.5v7M8.5 12h7" />
+  </svg>
+)
+
+export const IconLink = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M9.5 14.5l5-5" />
+    <path d="M8 12l-1.8 1.8a3.2 3.2 0 0 0 4.5 4.5L12.5 16.5M16 12l1.8-1.8a3.2 3.2 0 0 0-4.5-4.5L11.5 7.5" />
+  </svg>
+)
+
+export const IconType = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M5 7V5.5h14V7M12 5.5V19M9.5 19h5" />
+  </svg>
+)
+
 export const GlyphNote = (p: P) => (
   <svg {...base} {...p}>
     <path d="M5 4.5h14v10l-4.5 4.5H5z" />

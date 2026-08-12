@@ -3,6 +3,7 @@ import type { Platform } from '../types'
 import {
   GlyphCamera,
   GlyphDoc,
+  GlyphImage,
   GlyphMusic,
   GlyphNote,
   GlyphPlay,
@@ -33,6 +34,8 @@ export function platformLabel(platform: Platform): string {
       return 'Article'
     case 'note':
       return 'Note'
+    case 'image':
+      return 'Screenshot'
     default:
       return 'Saved'
   }
@@ -65,6 +68,8 @@ export function platformMeta(platform: Platform): PlatformMeta {
       return { label: 'Article', swatch: 'linear-gradient(135deg,#8b6dff,#5b46c9)', glyph: GlyphDoc }
     case 'note':
       return { label: 'Note', swatch: 'linear-gradient(135deg,#ffcf7a,#e0a24a)', glyph: GlyphNote }
+    case 'image':
+      return { label: 'Screenshot', swatch: 'linear-gradient(135deg,#5ad1c9,#2f8f86)', glyph: GlyphImage }
     default:
       return { label: 'Saved', swatch: 'linear-gradient(135deg,#b6b5c4,#7d7c90)', glyph: GlyphDoc }
   }

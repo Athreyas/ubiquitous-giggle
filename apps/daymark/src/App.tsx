@@ -5,10 +5,12 @@ import { NavRail, type ViewKey } from './components/NavRail'
 import { MemoriesView } from './components/MemoriesView'
 import { LibraryView } from './components/LibraryView'
 import { ImportView } from './components/ImportView'
+import { CaptureView } from './components/CaptureView'
 import { DetailModal } from './components/DetailModal'
 import { SettingsPanel } from './components/SettingsPanel'
 import { DEMO_ITEMS } from './lib/demoData'
 import { fetchKarakeepBookmarks } from './lib/karakeep'
+import { enrichAll } from './lib/extract'
 import { addImported, loadImported, mergeLibrary } from './lib/importStore'
 import { markDismissed, markOpened, markSurfaced, selectDailyMemories, todayKey } from './lib/selection'
 import { loadSettings, loadSurfacing, saveSettings, saveSurfacing } from './lib/storage'
@@ -18,7 +20,7 @@ export default function App() {
   const [settings, setSettings] = useState<KarakeepSettings>(() => loadSettings())
   const [surfacing, setSurfacing] = useState<SurfacingState>(() => loadSurfacing())
   const [baseLibrary, setBaseLibrary] = useState<MemoryItem[]>([])
-  const [imported, setImported] = useState<MemoryItem[]>(() => loadImported())
+  const [imported, setImported] = useState<MemoryItem[]>(() => enrichAll(loadImported()))
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [shuffleSalt, setShuffleSalt] = useState(0)
@@ -36,13 +38,13 @@ export default function App() {
     setError(null)
     try {
       if (settings.useDemo) {
-        setBaseLibrary(DEMO_ITEMS)
+        setBaseLibrary(enrichAll(DEMO_ITEMS))
         return
       }
       if (!settings.baseUrl || !settings.apiKey) {
         throw new Error('Add your Daykeep URL and API key, or turn on demo mode.')
       }
-      setBaseLibrary(await fetchKarakeepBookmarks(settings.baseUrl, settings.apiKey))
+      setBaseLibrary(enrichAll(await fetchKarakeepBookmarks(settings.baseUrl, settings.apiKey)))
     } catch (err) {
       setBaseLibrary([])
       setError(err instanceof Error ? err.message : 'Failed to load bookmarks')
@@ -60,7 +62,11 @@ export default function App() {
   const connected = !settings.useDemo && Boolean(settings.baseUrl && settings.apiKey)
 
   const handleImport = useCallback((items: MemoryItem[]) => {
-    setImported(addImported(items))
+    setImported(addImported(enrichAll(items)))
+  }, [])
+
+  const handleCapture = useCallback((item: MemoryItem) => {
+    setImported(addImported([item]))
   }, [])
 
   const spotlight = useMemo(
@@ -159,6 +165,11 @@ export default function App() {
                 loading={loading}
                 error={error}
                 onOpen={openDetail}
+              />
+            ) : view === 'capture' ? (
+              <CaptureView
+                onCapture={handleCapture}
+                onGoToLibrary={() => setView('library')}
               />
             ) : (
               <ImportView
