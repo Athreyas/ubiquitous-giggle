@@ -1,3 +1,5 @@
+> **Status (MARK-1):** Daykeep/Karakeep has been removed from the product tree. Treat historical Phase 0–2 notes below as archive context only. Current stack: `apps/daymark` + `apps/api`.
+
 # Second Brain — Plan (Karakeep + Daily Memory)
 
 ## Verdict

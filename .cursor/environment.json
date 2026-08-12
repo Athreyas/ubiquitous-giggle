@@ -1,5 +1,5 @@
 {
-  "name": "Daykeep + Daymark",
+  "name": "Daymark",
   "install": "bash .cursor/install.sh",
   "terminals": [
     {
@@ -7,8 +7,8 @@
       "command": "bash .cursor/start-daymark.sh"
     },
     {
-      "name": "daykeep-workers",
-      "command": "bash .cursor/start-daykeep-workers.sh"
+      "name": "api",
+      "command": "bash .cursor/start-api.sh"
     }
   ]
 }

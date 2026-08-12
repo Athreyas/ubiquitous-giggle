@@ -1,7 +1,7 @@
 # UI inspiration — core memory
 
 A curated, approved toolbox for building UI across our projects (Daymark,
-Daykeep, and future cloud projects). This is the human-readable copy of the
+and future cloud projects). This is the human-readable copy of the
 always-on Cursor rule at [`.cursor/rules/ui-inspiration.mdc`](../.cursor/rules/ui-inspiration.mdc),
 which is what AI agents automatically read.
 
