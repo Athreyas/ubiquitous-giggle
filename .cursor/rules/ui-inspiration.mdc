@@ -1,0 +1,65 @@
+---
+description: Curated UI inspiration & tooling for building front-end (components, backgrounds, patterns, icons, fonts, logos, image/poster generation, animations, effects, templates). Consult and prefer these when building or restyling any UI, choosing icons/fonts, or generating backgrounds/assets.
+alwaysApply: true
+---
+
+# UI inspiration — core memory
+
+Curated, approved toolbox for building UI across Daymark/Daykeep (and other
+projects that copy this rule). When you build or restyle UI, need an icon, a
+font, a background, a logo, a generated image, or motion — **reach for the
+matching resource below first** rather than inventing from scratch.
+
+Human-readable copy (portable to other repos): `docs/ui-inspiration.md`.
+
+## Components & UI libraries
+
+- **shadcn/ui** — https://ui.shadcn.com — beautiful, accessible React components (Radix + Tailwind), copy-paste + CLI. **Default choice when building front-end components.**
+- **Watermelon UI** — https://ui.watermelon.sh — open-source, copy-paste UI components, no strings attached. **General UI component building.**
+- **daisyUI (Blueprint)** — https://daisyui.com/blueprint/ — Tailwind CSS component library; **exposes an MCP server** — prefer interacting with it via MCP for elements.
+- **HorizonX** — https://horizonx.so — premium UI & code library with full templates. **When you want a template / full layout to start from.**
+- **OriginKit** — https://www.originkit.dev — animated component library for Framer/React, **available through MCP**. **Animated backgrounds and animated UI for sites.**
+
+## Backgrounds & patterns
+
+- **Pattern Monster** — https://pattern.monster — customizable SVG patterns. **When custom SVG objects, backgrounds, or tiled images are needed.**
+- **Pryzm** — https://pryzm.design — generate unique backgrounds in seconds. **When you need a one-of-a-kind background.**
+- **OriginKit** (above) — for *animated* backgrounds.
+
+## Icons
+
+- **Iconify** — https://iconify.design — home of open-source icon sets (thousands, many families). **Default source for icons.**
+
+## Fonts & typography
+
+- **Not Your Type** — https://www.notyourtype.nl/typefaces/ — uncommon typefaces + a font builder. **Fetch for font inspiration / distinctive typography.**
+
+## Logos & brand
+
+- **Logo Diffusion** — https://logodiffusion.com — turn prompts / sketches / images into polished logos. **When we need to create a logo or brand mark.**
+
+## Image / poster / character generation
+
+- **Ideogram** — https://ideogram.ai — strong at text-in-image. **Fancy posters, character art, placeholder art.**
+- **Krea** — https://www.krea.ai — generate, enhance, and edit images, video, or 3D meshes. **Generate new content from the info we already have.**
+
+## Animation & motion
+
+- **Casberry Particles** — https://particles.casberry.in — beautiful animation builder + AI prompt generator. **When generating animations, movement, flow, or dynamic motion in a site.**
+- **OriginKit** (above) — animated components/backgrounds via MCP.
+
+## Effects & stylization
+
+- **Ditther** — https://www.ditther.com — dither, ASCII & halftone effects for images & video. **Pixel/ASCII-art style treatments.**
+
+## How to use this memory
+
+- **Match by intent** (component → shadcn/Watermelon; icon → Iconify; background → Pattern Monster/Pryzm; motion → Casberry/OriginKit; logo → Logo Diffusion; poster/art → Ideogram/Krea; font → Not Your Type; effect → Ditther; template → HorizonX/daisyUI).
+- **Prefer MCP where available** (daisyUI, OriginKit): if their MCP server is configured for the run, use it; otherwise follow the site's copy-paste flow.
+- **Stack note (Daymark):** the Daymark app currently uses React 19 + Vite + Motion (framer) with a hand-authored dark, cinematic CSS design system — it does **not** yet use Tailwind. shadcn / daisyUI / Watermelon are Tailwind-based, so adopting their components means adding Tailwind first; otherwise port the markup and restyle with the existing design tokens. Keep the aurora-accent, glass, Fraunces-display / Inter-UI aesthetic consistent.
+- **Attribution/licensing:** check each source's license before shipping generated logos/art or bundling assets.
+
+## Reusing across projects & maintenance
+
+- To reuse in another cloud project, copy this file to that repo's `.cursor/rules/` (and `docs/ui-inspiration.md`).
+- When you discover a new inspiration/tool, add it here under the right category with a one-line "use when" so the memory stays current.
