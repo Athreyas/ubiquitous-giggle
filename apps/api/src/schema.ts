@@ -17,11 +17,23 @@ export const tokens = sqliteTable('tokens', {
   createdAt: text('created_at').notNull(),
 })
 
+export const spaces = sqliteTable('spaces', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  slug: text('slug').notNull(),
+  position: integer('position').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
 export const saves = sqliteTable('saves', {
   id: text('id').primaryKey(),
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
+  spaceId: text('space_id').references(() => spaces.id, { onDelete: 'set null' }),
   type: text('type').notNull(),
   title: text('title').notNull(),
   url: text('url'),
@@ -37,6 +49,28 @@ export const saves = sqliteTable('saves', {
   keywordsJson: text('keywords_json'),
 })
 
+export const embeddings = sqliteTable('embeddings', {
+  saveId: text('save_id')
+    .primaryKey()
+    .references(() => saves.id, { onDelete: 'cascade' }),
+  model: text('model').notNull(),
+  dims: integer('dims').notNull(),
+  vectorJson: text('vector_json').notNull(),
+  createdAt: text('created_at').notNull(),
+})
+
+export const enrichmentJobs = sqliteTable('enrichment_jobs', {
+  id: text('id').primaryKey(),
+  saveId: text('save_id')
+    .notNull()
+    .references(() => saves.id, { onDelete: 'cascade' }),
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
 export const surfacingState = sqliteTable('surfacing_state', {
   userId: text('user_id')
     .primaryKey()
@@ -46,5 +80,7 @@ export const surfacingState = sqliteTable('surfacing_state', {
 })
 
 export type User = typeof users.$inferSelect
+export type Space = typeof spaces.$inferSelect
 export type Save = typeof saves.$inferSelect
+export type EnrichmentJob = typeof enrichmentJobs.$inferSelect
 export type SurfacingStateRow = typeof surfacingState.$inferSelect

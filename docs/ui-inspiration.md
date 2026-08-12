@@ -1,6 +1,6 @@
 # UI inspiration — core memory
 
-A curated, approved toolbox for building UI across our projects (Daymark,
+A curated, approved toolbox for building UI across our projects (Warren,
 and future cloud projects). This is the human-readable copy of the
 always-on Cursor rule at [`.cursor/rules/ui-inspiration.mdc`](../.cursor/rules/ui-inspiration.mdc),
 which is what AI agents automatically read.
@@ -65,7 +65,7 @@ from scratch, and prefer MCP-enabled tools when their server is available.
 
 ## Notes
 
-- **Daymark stack:** React 19 + Vite + Motion (framer) with a hand-authored
+- **Warren stack:** React 19 + Vite + Motion (framer) with a hand-authored
   dark, cinematic CSS design system (aurora accent, glass, Fraunces display +
   Inter UI). It does **not** use Tailwind yet — shadcn / daisyUI / Watermelon
   are Tailwind-based, so adopting their components means adding Tailwind first,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Idempotent dependency bootstrap for Daymark (client + API).
+# Idempotent dependency bootstrap for Warren (client + API).
 # Safe to run repeatedly (used as the Cloud Agent `install` step).
 set -euo pipefail
 
@@ -23,16 +23,16 @@ export PATH
 corepack enable
 echo "node: $(node -v)"
 
-# --- Daymark client ---
-echo "== Daymark client: npm install =="
-( cd apps/daymark && npm install )
+# --- Warren client ---
+echo "== Warren client: npm install =="
+( cd apps/warren && npm install )
 
-# --- Daymark API (guarded for branches that lack it yet) ---
+# --- Warren API (guarded for branches that lack it yet) ---
 if [ -f apps/api/package.json ]; then
-  echo "== Daymark API: npm install =="
+  echo "== Warren API: npm install =="
   ( cd apps/api && npm install && npm rebuild better-sqlite3 )
 else
-  echo "== Daymark API: skipped (apps/api not present on this revision) =="
+  echo "== Warren API: skipped (apps/api not present on this revision) =="
 fi
 
 echo "== Install complete =="

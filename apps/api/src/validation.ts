@@ -24,6 +24,7 @@ export const loginSchema = z.object({
 
 export const createSaveSchema = z.object({
   id: z.string().trim().min(1).max(128).optional(),
+  spaceId: z.string().trim().min(1).max(128).nullable().optional(),
   type: bookmarkTypeSchema,
   title: z.string().trim().min(1).max(500),
   url: z.string().trim().url().optional(),
@@ -67,8 +68,15 @@ export const surfacingEventSchema = z
     message: 'Provide id or ids.',
   })
 
+export const embeddingUpsertSchema = z.object({
+  model: z.string().trim().min(1).max(120),
+  dims: z.number().int().min(8).max(4096),
+  vector: z.array(z.number()).min(8).max(4096),
+})
+
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type CreateSaveInput = z.infer<typeof createSaveSchema>
 export type PatchSaveInput = z.infer<typeof patchSaveSchema>
 export type SurfacingState = z.infer<typeof surfacingStateSchema>
+export type EmbeddingUpsertInput = z.infer<typeof embeddingUpsertSchema>

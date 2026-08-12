@@ -1,7 +1,7 @@
-# Daymark API
+# Warren API
 
-Standalone sync API for Daymark. It stores auth, saves, and surfacing state in a
-local SQLite database at `.data/daymark.sqlite`.
+Standalone sync API for Warren. It stores auth, saves, and surfacing state in a
+local SQLite database at `.data/warren.sqlite`.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ npm run dev
 ```
 
 The API listens on `http://127.0.0.1:8787` by default. Set `PORT` to override it.
-CORS allows the Daymark Vite origins `http://127.0.0.1:5173` and
+CORS allows the Warren Vite origins `http://127.0.0.1:5173` and
 `http://localhost:5173`.
 
 ## Scripts

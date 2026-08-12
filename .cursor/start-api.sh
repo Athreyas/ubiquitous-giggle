@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the Daymark sync API (Hono on :8787).
+# Start the Warren sync API (Hono on :8787).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

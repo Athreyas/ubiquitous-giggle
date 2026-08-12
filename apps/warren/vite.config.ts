@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    // Optional convenience proxy for the Daymark API during local dev — the
+    // Optional convenience proxy for the Warren API during local dev — the
     // client talks to `settings.apiBaseUrl` directly by default, so this is
     // only useful if you point `apiBaseUrl` at `/api` instead of a full URL.
     proxy: {

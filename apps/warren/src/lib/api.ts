@@ -19,7 +19,7 @@ function toMemoryItem(save: Save): MemoryItem {
   }
 }
 
-/** Fetches saves from the Daymark API (`GET /api/v1/saves`), paginating up to `limit`. */
+/** Fetches saves from the Warren API (`GET /api/v1/saves`), paginating up to `limit`. */
 export async function fetchLibrarySaves(
   settings: LibrarySettings,
   limit = 200,

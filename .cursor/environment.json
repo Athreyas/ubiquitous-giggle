@@ -1,10 +1,10 @@
 {
-  "name": "Daymark",
+  "name": "Warren",
   "install": "bash .cursor/install.sh",
   "terminals": [
     {
-      "name": "daymark",
-      "command": "bash .cursor/start-daymark.sh"
+      "name": "warren",
+      "command": "bash .cursor/start-warren.sh"
     },
     {
       "name": "api",

@@ -107,13 +107,13 @@ export function SettingsPanel({ settings, onClose, onSave }: Props) {
         <h2 id="settings-title">Connect your library</h2>
         <p>
           Demo mode works with no server. Sign in — or paste a token — to sync your saves and
-          daily memory with the Daymark API.
+          daily memory with the Warren API.
         </p>
 
         <div className="toggle-row">
           <div>
             <div className="lbl">Use demo library</div>
-            <p className="sub">Explore Daymark with a rich sample set</p>
+            <p className="sub">Explore Warren with a rich sample set</p>
           </div>
           <button
             type="button"
@@ -187,7 +187,7 @@ export function SettingsPanel({ settings, onClose, onSave }: Props) {
                     <input
                       id="token"
                       type="password"
-                      placeholder="Bearer token from the Daymark API"
+                      placeholder="Bearer token from the Warren API"
                       value={tokenInput}
                       autoComplete="off"
                       onChange={(e) => setTokenInput(e.target.value)}

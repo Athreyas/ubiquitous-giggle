@@ -4,8 +4,8 @@ dist/
 .DS_Store
 *.log
 .vite/
-apps/daymark/node_modules/
-apps/daymark/dist/
+apps/warren/node_modules/
+apps/warren/dist/
 apps/api/node_modules/
 apps/api/dist/
 apps/api/.data/
