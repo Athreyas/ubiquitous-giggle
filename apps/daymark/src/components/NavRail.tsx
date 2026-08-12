@@ -8,6 +8,7 @@ interface Props {
   onNavigate: (view: ViewKey) => void
   onOpenSettings: () => void
   demo: boolean
+  signedIn: boolean
 }
 
 const ITEMS: { key: ViewKey; label: string; Icon: typeof IconSparkle }[] = [
@@ -15,7 +16,7 @@ const ITEMS: { key: ViewKey; label: string; Icon: typeof IconSparkle }[] = [
   { key: 'library', label: 'Library', Icon: IconLibrary },
 ]
 
-export function NavRail({ active, onNavigate, onOpenSettings, demo }: Props) {
+export function NavRail({ active, onNavigate, onOpenSettings, demo, signedIn }: Props) {
   return (
     <aside className="rail">
       <div className="brand">
@@ -52,15 +53,17 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo }: Props) {
         <div className="rail-tip">
           {demo ? (
             <>
-              You&apos;re exploring the <b>demo library</b>. Connect Daykeep to resurface your
-              own saves.
+              You&apos;re exploring the <b>demo library</b>. Sign in to resurface your own
+              saves.
             </>
+          ) : signedIn ? (
+            <>Connected to your cloud library.</>
           ) : (
-            <>Connected to your Daykeep library.</>
+            <>Sign in to sync your saves, or switch on demo mode.</>
           )}
         </div>
         <button type="button" className="btn btn-ghost" onClick={onOpenSettings}>
-          <IconGear /> Connect library
+          <IconGear /> {demo || !signedIn ? 'Sign in' : 'Cloud library'}
         </button>
       </div>
     </aside>

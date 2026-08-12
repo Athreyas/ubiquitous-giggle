@@ -30,7 +30,7 @@ echo "== Daymark client: npm install =="
 # --- Daymark API (guarded for branches that lack it yet) ---
 if [ -f apps/api/package.json ]; then
   echo "== Daymark API: npm install =="
-  ( cd apps/api && npm install )
+  ( cd apps/api && npm install && npm rebuild better-sqlite3 )
 else
   echo "== Daymark API: skipped (apps/api not present on this revision) =="
 fi

@@ -2,7 +2,7 @@
 
 ## Cursor Cloud specific instructions
 
-Daymark is a standalone Vite + React client (`apps/daymark`) plus a Hono sync API (`apps/api`). The former Karakeep/Daykeep fork has been removed.
+Daymark is a standalone Vite + React client (`apps/daymark`) plus a Hono sync API (`apps/api`). The former AGPL soft-fork tree has been removed.
 
 ### Services
 
@@ -22,4 +22,4 @@ Demo mode in the client works **without** the API. Synced library / auth require
 
 - Cloud shells may ship Node 22 on PATH; `.cursor/env-common.sh` / `install.sh` pin **Node 24** via nvm — source that before running services.
 - API SQLite data lives in `apps/api/.data/` (gitignored).
-- Do not reintroduce Karakeep/Daykeep packages or AGPL attribution.
+- Do not reintroduce AGPL soft-fork packages or attribution into this tree.

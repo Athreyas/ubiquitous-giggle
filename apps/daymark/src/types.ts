@@ -33,8 +33,25 @@ export interface SurfacingState {
   dismissed: string[]
 }
 
-export interface KarakeepSettings {
-  baseUrl: string
-  apiKey: string
+/** Signed-in Daymark account. */
+export interface User {
+  id: string
+  email: string
+  name?: string
+}
+
+/**
+ * Client connection + auth settings, persisted to localStorage.
+ * `token` is the Bearer token for the Daymark API (`apps/api`), empty when logged out.
+ */
+export interface LibrarySettings {
   useDemo: boolean
+  apiBaseUrl: string
+  token: string
+}
+
+export const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8787'
+
+export function defaultLibrarySettings(): LibrarySettings {
+  return { useDemo: true, apiBaseUrl: DEFAULT_API_BASE_URL, token: '' }
 }

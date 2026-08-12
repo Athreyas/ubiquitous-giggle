@@ -2,7 +2,8 @@
 
 Daily Memory — the USP for this second brain.
 
-Each day, Daymark picks 1–2 forgotten saves from your Karakeep library (or a demo set) and presents them as calm memory cards: visual, summary, age, tags, and a one-tap reopen.
+Each day, Daymark picks 1–2 forgotten saves from your synced library (or a demo set) and
+presents them as calm memory cards: visual, summary, age, tags, and a one-tap reopen.
 
 ## Run
 
@@ -11,11 +12,13 @@ npm install
 npm run dev
 ```
 
-## Connect Karakeep
+Demo mode works fully offline — no server required.
 
-1. Deploy Karakeep from `../../deploy`
-2. Create an API key in Karakeep → Settings → API Keys
-3. In Daymark → Connect Karakeep, paste URL + key and turn off demo mode
+## Connect the Daymark API
+
+1. Run the API from `../api` (defaults to `http://127.0.0.1:8787`)
+2. In Daymark → Settings, turn off demo mode
+3. Sign in / create an account, or paste an API token, then Save
 
 ## Selection (v1)
 

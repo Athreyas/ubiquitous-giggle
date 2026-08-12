@@ -7,13 +7,14 @@ import { LibraryView } from './components/LibraryView'
 import { DetailModal } from './components/DetailModal'
 import { SettingsPanel } from './components/SettingsPanel'
 import { DEMO_ITEMS } from './lib/demoData'
-import { fetchKarakeepBookmarks } from './lib/karakeep'
+import { fetchLibrarySaves } from './lib/api'
+import { getSurfacing, postSurfacingEvent, putSurfacing } from './lib/api/surfacing'
 import { markDismissed, markOpened, markSurfaced, selectDailyMemories, todayKey } from './lib/selection'
 import { loadSettings, loadSurfacing, saveSettings, saveSurfacing } from './lib/storage'
-import type { KarakeepSettings, MemoryItem, SurfacingState } from './types'
+import type { LibrarySettings, MemoryItem, SurfacingState } from './types'
 
 export default function App() {
-  const [settings, setSettings] = useState<KarakeepSettings>(() => loadSettings())
+  const [settings, setSettings] = useState<LibrarySettings>(() => loadSettings())
   const [surfacing, setSurfacing] = useState<SurfacingState>(() => loadSurfacing())
   const [library, setLibrary] = useState<MemoryItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -23,10 +24,50 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [detail, setDetail] = useState<MemoryItem | null>(null)
 
-  const persistSurfacing = useCallback((next: SurfacingState) => {
-    setSurfacing(next)
-    saveSurfacing(next)
-  }, [])
+  const canSync = !settings.useDemo && Boolean(settings.token)
+
+  const emitSurfacingEvent = useCallback(
+    (type: 'surfaced' | 'opened' | 'dismissed', saveId: string) => {
+      if (!canSync) return
+      void postSurfacingEvent(settings, { type, saveId, at: new Date().toISOString() }).catch(
+        () => {
+          // Best-effort telemetry — safe to drop if the API is unreachable.
+        },
+      )
+    },
+    [canSync, settings],
+  )
+
+  const persistSurfacing = useCallback(
+    (next: SurfacingState) => {
+      setSurfacing(next)
+      saveSurfacing(next)
+      if (canSync) {
+        void putSurfacing(settings, next).catch(() => {
+          // Best-effort sync — the local cache remains the source of truth on failure.
+        })
+      }
+    },
+    [canSync, settings],
+  )
+
+  // Pull the synced surfacing state once per signed-in session; local cache is the fallback.
+  useEffect(() => {
+    if (!canSync) return
+    let cancelled = false
+    getSurfacing(settings)
+      .then((remote) => {
+        if (cancelled) return
+        setSurfacing(remote)
+        saveSurfacing(remote)
+      })
+      .catch(() => {
+        // Keep using the local cache if the API is unreachable.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [canSync, settings])
 
   const loadLibrary = useCallback(async () => {
     setLoading(true)
@@ -36,13 +77,17 @@ export default function App() {
         setLibrary(DEMO_ITEMS)
         return
       }
-      if (!settings.baseUrl || !settings.apiKey) {
-        throw new Error('Add your Daykeep URL and API key, or turn on demo mode.')
+      if (!settings.token) {
+        setLibrary([])
+        setError(
+          'Sign in or paste a token in Settings to sync your library — or turn on demo mode to explore.',
+        )
+        return
       }
-      setLibrary(await fetchKarakeepBookmarks(settings.baseUrl, settings.apiKey))
+      setLibrary(await fetchLibrarySaves(settings))
     } catch (err) {
       setLibrary([])
-      setError(err instanceof Error ? err.message : 'Failed to load bookmarks')
+      setError(err instanceof Error ? err.message : 'Failed to load your saves.')
     } finally {
       setLoading(false)
     }
@@ -76,13 +121,18 @@ export default function App() {
       if (same) return prev
       const next = markSurfaced(prev, ids)
       saveSurfacing(next)
+      if (canSync) void putSurfacing(settings, next).catch(() => {})
+      for (const id of ids) emitSurfacingEvent('surfaced', id)
       return next
     })
-  }, [loading, spotlightIds])
+  }, [loading, spotlightIds, canSync, settings, emitSurfacingEvent])
 
   const markVisited = useCallback(
-    (item: MemoryItem) => persistSurfacing(markOpened(surfacing, item.id)),
-    [persistSurfacing, surfacing],
+    (item: MemoryItem) => {
+      persistSurfacing(markOpened(surfacing, item.id))
+      emitSurfacingEvent('opened', item.id)
+    },
+    [persistSurfacing, surfacing, emitSurfacingEvent],
   )
 
   const openDetail = useCallback((item: MemoryItem) => setDetail(item), [])
@@ -99,11 +149,12 @@ export default function App() {
   const handleDismiss = useCallback(
     (item: MemoryItem) => {
       persistSurfacing(markDismissed(surfacing, item.id))
+      emitSurfacingEvent('dismissed', item.id)
     },
-    [persistSurfacing, surfacing],
+    [persistSurfacing, surfacing, emitSurfacingEvent],
   )
 
-  const handleSaveSettings = (next: KarakeepSettings) => {
+  const handleSaveSettings = (next: LibrarySettings) => {
     setSettings(next)
     saveSettings(next)
     setShowSettings(false)
@@ -119,6 +170,7 @@ export default function App() {
         onNavigate={setView}
         onOpenSettings={() => setShowSettings(true)}
         demo={settings.useDemo}
+        signedIn={!settings.useDemo && Boolean(settings.token)}
       />
 
       <main className="main">

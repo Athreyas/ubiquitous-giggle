@@ -1,6 +1,6 @@
 # Daymark deploy notes
 
-The AGPL Karakeep/Daykeep Docker stack has been removed.
+The previous AGPL Docker library stack has been removed.
 
 ## Local development (recommended)
 

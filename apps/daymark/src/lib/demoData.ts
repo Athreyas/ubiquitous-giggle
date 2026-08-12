@@ -1,6 +1,6 @@
 import type { MemoryItem } from '../types'
 
-/** Seed library so Daily Memory works without a live Karakeep instance. */
+/** Seed library so Daily Memory works without a live Daymark API instance. */
 export const DEMO_ITEMS: MemoryItem[] = [
   {
     id: 'demo-1',
