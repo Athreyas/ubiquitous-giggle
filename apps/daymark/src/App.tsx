@@ -1,21 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MemoryOverlay } from './components/MemoryOverlay'
+import { AnimatePresence, motion } from 'motion/react'
+import { format } from 'date-fns'
+import { NavRail, type ViewKey } from './components/NavRail'
+import { MemoriesView } from './components/MemoriesView'
+import { LibraryView } from './components/LibraryView'
+import { DetailModal } from './components/DetailModal'
 import { SettingsPanel } from './components/SettingsPanel'
 import { DEMO_ITEMS } from './lib/demoData'
 import { fetchKarakeepBookmarks } from './lib/karakeep'
-import {
-  markDismissed,
-  markOpened,
-  markSurfaced,
-  selectDailyMemories,
-  todayKey,
-} from './lib/selection'
-import {
-  loadSettings,
-  loadSurfacing,
-  saveSettings,
-  saveSurfacing,
-} from './lib/storage'
+import { markDismissed, markOpened, markSurfaced, selectDailyMemories, todayKey } from './lib/selection'
+import { loadSettings, loadSurfacing, saveSettings, saveSurfacing } from './lib/storage'
 import type { KarakeepSettings, MemoryItem, SurfacingState } from './types'
 
 export default function App() {
@@ -25,9 +19,9 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [shuffleSalt, setShuffleSalt] = useState(0)
-  const [showMemory, setShowMemory] = useState(true)
+  const [view, setView] = useState<ViewKey>('memories')
   const [showSettings, setShowSettings] = useState(false)
-  const [noteView, setNoteView] = useState<MemoryItem | null>(null)
+  const [detail, setDetail] = useState<MemoryItem | null>(null)
 
   const persistSurfacing = useCallback((next: SurfacingState) => {
     setSurfacing(next)
@@ -43,10 +37,9 @@ export default function App() {
         return
       }
       if (!settings.baseUrl || !settings.apiKey) {
-        throw new Error('Add your Karakeep URL and API key, or enable demo mode.')
+        throw new Error('Add your Daykeep URL and API key, or turn on demo mode.')
       }
-      const items = await fetchKarakeepBookmarks(settings.baseUrl, settings.apiKey)
-      setLibrary(items)
+      setLibrary(await fetchKarakeepBookmarks(settings.baseUrl, settings.apiKey))
     } catch (err) {
       setLibrary([])
       setError(err instanceof Error ? err.message : 'Failed to load bookmarks')
@@ -59,46 +52,56 @@ export default function App() {
     void loadLibrary()
   }, [loadLibrary])
 
-  const memories = useMemo(
+  const spotlight = useMemo(
     () => selectDailyMemories(library, surfacing, { count: 2, shuffleSalt }),
     [library, surfacing, shuffleSalt],
   )
 
-  const memoryIds = memories.map((m) => m.id).join('|')
+  const feed = useMemo(() => {
+    const ids = new Set(spotlight.map((m) => m.id))
+    return selectDailyMemories(library, surfacing, { count: 12, shuffleSalt }).filter(
+      (m) => !ids.has(m.id),
+    )
+  }, [library, surfacing, shuffleSalt, spotlight])
+
+  const spotlightIds = spotlight.map((m) => m.id).join('|')
 
   useEffect(() => {
-    if (loading || !memoryIds) return
+    if (loading || !spotlightIds) return
     const day = todayKey()
-    const ids = memoryIds.split('|')
+    const ids = spotlightIds.split('|')
     setSurfacing((prev) => {
       const current = prev.byDay[day] ?? []
-      const same =
-        current.length === ids.length && current.every((id, i) => id === ids[i])
+      const same = current.length === ids.length && current.every((id, i) => id === ids[i])
       if (same) return prev
       const next = markSurfaced(prev, ids)
       saveSurfacing(next)
       return next
     })
-  }, [loading, memoryIds])
+  }, [loading, spotlightIds])
 
-  const handleOpen = (item: MemoryItem) => {
-    persistSurfacing(markOpened(surfacing, item.id))
-    if (item.url) {
-      window.open(item.url, '_blank', 'noopener,noreferrer')
-    } else {
-      setNoteView(item)
-    }
-  }
+  const markVisited = useCallback(
+    (item: MemoryItem) => persistSurfacing(markOpened(surfacing, item.id)),
+    [persistSurfacing, surfacing],
+  )
 
-  const handleDismiss = (item: MemoryItem) => {
-    const next = markDismissed(surfacing, item.id)
-    persistSurfacing(next)
-    setShuffleSalt((s) => s + 1)
-  }
+  const openDetail = useCallback((item: MemoryItem) => setDetail(item), [])
 
-  const handleShuffle = () => {
-    setShuffleSalt((s) => s + 1)
-  }
+  const openSpotlight = useCallback(
+    (item: MemoryItem) => {
+      markVisited(item)
+      if (item.url) window.open(item.url, '_blank', 'noopener,noreferrer')
+      else setDetail(item)
+    },
+    [markVisited],
+  )
+
+  const handleDismiss = useCallback(
+    (item: MemoryItem) => {
+      persistSurfacing(markDismissed(surfacing, item.id))
+    },
+    [persistSurfacing, surfacing],
+  )
 
   const handleSaveSettings = (next: KarakeepSettings) => {
     setSettings(next)
@@ -107,72 +110,71 @@ export default function App() {
     setShuffleSalt(0)
   }
 
+  const todayLabel = format(new Date(), 'EEE, MMM d')
+
   return (
-    <div className="app-shell">
-      <div className={`library-backdrop ${showMemory ? 'is-dimmed' : ''}`}>
-        <header className="topbar">
-          <div className="brand-mark">
-            <div className="brand-orb" aria-hidden />
-            <div>
-              <div className="brand-name">Daymark</div>
-              <p className="brand-sub">Your second brain, remembered daily</p>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" className="ghost-btn" onClick={() => setShowMemory(true)}>
-              Today&apos;s memory
-            </button>
-            <button type="button" className="ghost-btn" onClick={() => setShowSettings(true)}>
-              Settings
-            </button>
-          </div>
-        </header>
+    <div className="app">
+      <NavRail
+        active={view}
+        onNavigate={setView}
+        onOpenSettings={() => setShowSettings(true)}
+        demo={settings.useDemo}
+      />
 
-        <section className="library-grid" aria-label="Library preview">
-          {(library.length ? library : DEMO_ITEMS).slice(0, 8).map((item) => (
-            <article className="library-tile" key={item.id}>
-              <h3>{item.title}</h3>
-              <p>{item.summary}</p>
-            </article>
-          ))}
-        </section>
-      </div>
+      <main className="main">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={view}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {view === 'memories' ? (
+              <MemoriesView
+                todayLabel={todayLabel}
+                spotlight={spotlight}
+                feed={feed}
+                loading={loading}
+                error={error}
+                onOpen={openSpotlight}
+                onOpenCard={openDetail}
+                onDismiss={handleDismiss}
+                onShuffle={() => setShuffleSalt((s) => s + 1)}
+              />
+            ) : (
+              <LibraryView
+                items={library}
+                loading={loading}
+                error={error}
+                onOpen={openDetail}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </main>
 
-      {showMemory ? (
-        <MemoryOverlay
-          items={memories}
-          loading={loading}
-          error={error}
-          onOpen={handleOpen}
-          onDismiss={handleDismiss}
-          onShuffle={handleShuffle}
-          onEnterLibrary={() => setShowMemory(false)}
-          onOpenSettings={() => setShowSettings(true)}
-        />
-      ) : null}
+      <AnimatePresence>
+        {detail ? (
+          <DetailModal
+            key="detail"
+            item={detail}
+            onClose={() => setDetail(null)}
+            onOpen={markVisited}
+          />
+        ) : null}
+      </AnimatePresence>
 
-      {showSettings ? (
-        <SettingsPanel
-          settings={settings}
-          onClose={() => setShowSettings(false)}
-          onSave={handleSaveSettings}
-        />
-      ) : null}
-
-      {noteView ? (
-        <div className="settings-panel" role="dialog" aria-modal="true">
-          <div className="settings-card">
-            <h2>{noteView.title}</h2>
-            <p>{noteView.summary}</p>
-            {noteView.note ? <p className="memory-note">{noteView.note}</p> : null}
-            <div className="settings-actions">
-              <button type="button" className="btn-primary" onClick={() => setNoteView(null)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <AnimatePresence>
+        {showSettings ? (
+          <SettingsPanel
+            key="settings"
+            settings={settings}
+            onClose={() => setShowSettings(false)}
+            onSave={handleSaveSettings}
+          />
+        ) : null}
+      </AnimatePresence>
     </div>
   )
 }
