@@ -1,5 +1,6 @@
 import { motion } from 'motion/react'
 import { IconGear, IconLibrary, IconSparkle } from './Icons'
+import { WarrenMark } from './WarrenMark'
 
 export type ViewKey = 'memories' | 'library'
 
@@ -12,7 +13,7 @@ interface Props {
 }
 
 const ITEMS: { key: ViewKey; label: string; Icon: typeof IconSparkle }[] = [
-  { key: 'memories', label: 'Memories', Icon: IconSparkle },
+  { key: 'memories', label: 'Daily Echo', Icon: IconSparkle },
   { key: 'library', label: 'Library', Icon: IconLibrary },
 ]
 
@@ -20,10 +21,10 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo, signedIn }: 
   return (
     <aside className="rail">
       <div className="brand">
-        <div className="brand-orb" aria-hidden />
+        <WarrenMark />
         <div>
           <div className="brand-name">Warren</div>
-          <div className="brand-sub">everything, all connected</div>
+          <div className="brand-sub">everything, connected</div>
         </div>
       </div>
 
@@ -32,15 +33,15 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo, signedIn }: 
           <button
             key={key}
             type="button"
-            className={`nav-item ${active === key ? 'active' : ''}`}
+            className={`nav-item relative ${active === key ? 'active' : ''}`}
             onClick={() => onNavigate(key)}
             aria-current={active === key ? 'page' : undefined}
           >
             {active === key ? (
               <motion.span
-                className="nav-glow"
-                layoutId="nav-glow"
-                transition={{ type: 'spring', stiffness: 400, damping: 34 }}
+                className="absolute inset-0 -z-10 rounded-[12px] bg-[var(--accent-soft)]"
+                layoutId="nav-active"
+                transition={{ type: 'spring', stiffness: 420, damping: 36 }}
               />
             ) : null}
             <Icon />
@@ -53,8 +54,7 @@ export function NavRail({ active, onNavigate, onOpenSettings, demo, signedIn }: 
         <div className="rail-tip">
           {demo ? (
             <>
-              You&apos;re exploring the <b>demo library</b>. Sign in to resurface your own
-              saves.
+              Exploring the <b>demo library</b>. Sign in to resurface your own saves.
             </>
           ) : signedIn ? (
             <>Connected to your cloud library.</>

@@ -22,8 +22,8 @@ export function DetailModal({ item, onClose, onOpen }: Props) {
       onClick={onClose}
     >
       <motion.div
-        className="detail"
-        layoutId={`card-${item.id}`}
+        className="detail sheet"
+        layoutId={`star-${item.id}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
