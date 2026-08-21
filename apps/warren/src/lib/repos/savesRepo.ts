@@ -44,10 +44,13 @@ export class LocalSavesRepo {
 }
 
 export class ApiSavesRepo {
-  constructor(
-    private readonly settings: LibrarySettings,
-    private readonly mirror = new LocalSavesRepo(),
-  ) {}
+  private readonly settings: LibrarySettings
+  private readonly mirror: LocalSavesRepo
+
+  constructor(settings: LibrarySettings, mirror = new LocalSavesRepo()) {
+    this.settings = settings
+    this.mirror = mirror
+  }
 
   async list(limit = 500): Promise<Save[]> {
     const items: Save[] = []

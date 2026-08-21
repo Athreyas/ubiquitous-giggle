@@ -18,10 +18,13 @@ export class LocalSurfacingRepo {
 }
 
 export class ApiSurfacingRepo {
-  constructor(
-    private readonly settings: LibrarySettings,
-    private readonly mirror = new LocalSurfacingRepo(),
-  ) {}
+  private readonly settings: LibrarySettings
+  private readonly mirror: LocalSurfacingRepo
+
+  constructor(settings: LibrarySettings, mirror = new LocalSurfacingRepo()) {
+    this.settings = settings
+    this.mirror = mirror
+  }
 
   async get(): Promise<SurfacingState> {
     const state = await getSurfacing(this.settings)
