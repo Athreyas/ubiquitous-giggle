@@ -66,6 +66,7 @@ function migrateLegacySettings(legacy: LegacySettings): LibrarySettings {
     token: legacy.apiKey?.trim() || '',
     useDemo: legacy.useDemo ?? true,
     activeSpaceId: null,
+    lastUsedSpaceId: null,
   }
 }
 

@@ -781,6 +781,41 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     })
   })
 
+  app.get('/api/v1/constellations', requireAuth, (c) => {
+    const user = c.get('user')
+    const spaceId = c.req.query('spaceId')
+    const filters: SQL[] = [eq(constellations.userId, user.id)]
+    if (spaceId) filters.push(eq(constellations.spaceId, spaceId))
+
+    const rows = db
+      .select()
+      .from(constellations)
+      .where(and(...filters))
+      .orderBy(desc(constellations.updatedAt))
+      .all()
+
+    const items = rows.map((row) => {
+      const members = db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, row.id))
+        .orderBy(asc(constellationMembers.position))
+        .all()
+      return {
+        id: row.id,
+        name: row.name,
+        spaceId: row.spaceId,
+        pinned: Boolean(row.pinned),
+        memberIds: members.map((member) => member.saveId),
+        size: members.length,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      }
+    })
+
+    return c.json({ items })
+  })
+
   app.get('/api/v1/saves/:id/related', requireAuth, (c) => {
     const user = c.get('user')
     const save = getSaveForUser(db, user.id, c.req.param('id'))

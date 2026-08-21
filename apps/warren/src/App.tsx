@@ -216,7 +216,11 @@ export default function App() {
 
   const handleSelectSpace = useCallback(
     (spaceId: string | null) => {
-      const next = { ...settings, activeSpaceId: spaceId }
+      const next = {
+        ...settings,
+        activeSpaceId: spaceId,
+        lastUsedSpaceId: spaceId ?? settings.lastUsedSpaceId,
+      }
       setSettings(next)
       saveSettings(next)
       setShuffleSalt(0)
@@ -314,8 +318,13 @@ export default function App() {
           <DetailModal
             key="detail"
             item={detail}
+            settings={settings}
             onClose={() => setDetail(null)}
             onOpen={markVisited}
+            onOpenRelated={(related) => {
+              setDetail(related)
+              markVisited(related)
+            }}
           />
         ) : null}
       </AnimatePresence>

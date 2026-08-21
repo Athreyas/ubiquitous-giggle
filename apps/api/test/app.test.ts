@@ -211,6 +211,47 @@ describe('auth', () => {
     expect(save.spaceId).toBe(personal?.id)
   })
 
+  it('lists persisted constellations after clustering', async () => {
+    const { body: registered } = await register('constellations@example.com')
+    const first = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Cluster list A'))
+    ).json()) as MemoryItemBody
+    const second = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Cluster list B'))
+    ).json()) as MemoryItemBody
+
+    const tight = [1, 0, 0, 0, 0, 0, 0, 0]
+    const almostTight = [0.99, 0.01, 0, 0, 0, 0, 0, 0]
+    for (const [id, vector] of [
+      [first.id, tight],
+      [second.id, almostTight],
+    ] as const) {
+      const put = await app.request(`/api/v1/saves/${id}/embedding`, {
+        method: 'PUT',
+        headers: jsonAuthHeaders(registered.token),
+        body: JSON.stringify({ model: 'test', dims: 8, vector }),
+      })
+      expect(put.status).toBe(200)
+    }
+
+    const run = await app.request('/api/v1/clustering/run', {
+      method: 'POST',
+      headers: authHeaders(registered.token),
+    })
+    expect(run.status).toBe(200)
+    await expect(run.json()).resolves.toMatchObject({ persisted: true })
+
+    const listed = await app.request('/api/v1/constellations', {
+      headers: authHeaders(registered.token),
+    })
+    expect(listed.status).toBe(200)
+    const body = (await listed.json()) as {
+      items: Array<{ name: string; memberIds: string[]; size: number }>
+    }
+    expect(body.items.length).toBeGreaterThan(0)
+    expect(body.items[0]?.memberIds.sort()).toEqual([first.id, second.id].sort())
+  })
+
   it('rotates a valid session token and invalidates the previous token', async () => {
     const registered = await register('refresh@example.com')
     const refresh = await app.request('/api/v1/auth/refresh', {
