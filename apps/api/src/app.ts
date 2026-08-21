@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { and, desc, eq, lt, type SQL } from 'drizzle-orm'
+import { and, desc, eq, lt, ne, type SQL } from 'drizzle-orm'
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { createMiddleware } from 'hono/factory'
@@ -12,6 +12,8 @@ import type { z } from 'zod'
 import { createToken, hashPassword, hashToken, tokenExpiry, verifyPassword } from './auth.js'
 import { createDatabase, type DatabaseClient } from './db.js'
 import {
+  constellationMembers,
+  constellations,
   embeddings,
   enrichmentJobs,
   saveLinks,
@@ -600,6 +602,102 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     })
   })
 
+  app.get('/api/v1/saves/:id/related', requireAuth, (c) => {
+    const user = c.get('user')
+    const save = getSaveForUser(db, user.id, c.req.param('id'))
+    if (!save) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+
+    const target = db.select().from(embeddings).where(eq(embeddings.saveId, save.id)).get()
+    if (!target) {
+      throw new HTTPException(404, { message: 'Embedding not found for this save.' })
+    }
+
+    const limit = parseLimit(c.req.query('limit'), 5, 20)
+    const targetVector = JSON.parse(target.vectorJson) as number[]
+
+    const others = db
+      .select({ save: saves, embedding: embeddings })
+      .from(embeddings)
+      .innerJoin(saves, eq(embeddings.saveId, saves.id))
+      .where(and(eq(saves.userId, user.id), ne(saves.id, save.id)))
+      .all()
+
+    const ranked = others
+      .filter((row) => row.embedding.dims === target.dims)
+      .map((row) => ({
+        save: row.save,
+        similarity: cosineSimilarity(targetVector, JSON.parse(row.embedding.vectorJson) as number[]),
+      }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit)
+
+    return c.json({
+      items: ranked.map((row) => ({ ...toMemoryItem(row.save), similarity: row.similarity })),
+    })
+  })
+
+  app.post('/api/v1/clustering/run', requireAuth, (c) => {
+    const user = c.get('user')
+    const threshold = 0.82
+
+    const rows = db
+      .select({ save: saves, embedding: embeddings })
+      .from(saves)
+      .innerJoin(embeddings, eq(embeddings.saveId, saves.id))
+      .where(and(eq(saves.userId, user.id), eq(saves.archived, 0)))
+      .all()
+
+    const clusters = greedyClusterBySimilarity(rows, threshold)
+    const now = new Date().toISOString()
+
+    const suggestions = clusters.map((cluster) => ({
+      id: `sug_${randomUUID()}`,
+      name: suggestConstellationName(cluster.map((row) => row.save)),
+      memberIds: cluster.map((row) => row.save.id),
+      size: cluster.length,
+    }))
+
+    // Persist as real constellations when the schema supports it (MARK-3 clustering
+    // stub). If a future migration removes these tables, fall back to suggestions-only.
+    let persisted = false
+    try {
+      for (const [index, cluster] of clusters.entries()) {
+        const constellationId = `csl_${randomUUID()}`
+        db.insert(constellations)
+          .values({
+            id: constellationId,
+            userId: user.id,
+            spaceId: cluster[0]?.save.spaceId ?? null,
+            name: suggestions[index]?.name ?? 'Suggested constellation',
+            pinned: 0,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .run()
+
+        cluster.forEach((row, position) => {
+          db.insert(constellationMembers)
+            .values({
+              constellationId,
+              saveId: row.save.id,
+              position,
+              createdAt: now,
+            })
+            .run()
+        })
+      }
+      persisted = clusters.length > 0
+    } catch {
+      // TODO(MARK-3): constellations tables unavailable on this schema revision —
+      // suggestions are still returned below, just not persisted.
+      persisted = false
+    }
+
+    return c.json({ suggestions, persisted })
+  })
+
   app.get('/api/v1/surfacing', requireAuth, (c) => {
     return c.json(loadSurfacingState(db, c.get('user').id))
   })
@@ -904,10 +1002,22 @@ async function processPendingEnrichmentJobs(database: DatabaseClient): Promise<v
       }
 
       const result = await enrichSave(save)
+
+      // Local hashed embedding — no cloud LLM (MARK-3 web fallback until CoreML/transformers lands).
+      const vector = hashEmbed(result.extractedText || save.title)
+
       const existingTags = parseStringArray(save.tagsJson)
-      const mergedTags = unique([...existingTags, ...result.keywords])
+      const neighborTags = boostTagsFromNeighbor(db, save.userId, save.id, vector)
+      const mergedTags = clampTagCount(unique([...existingTags, ...result.keywords, ...neighborTags]), save)
+
+      const summary =
+        save.summary.trim().length < SHORT_SUMMARY_MAX_LENGTH && result.extractedText
+          ? extractiveSummary(result.extractedText) || save.summary
+          : save.summary
+
       db.update(saves)
         .set({
+          summary,
           tagsJson: JSON.stringify(mergedTags),
           extractedText: result.extractedText || save.extractedText,
           keywordsJson: JSON.stringify(result.keywords),
@@ -916,8 +1026,6 @@ async function processPendingEnrichmentJobs(database: DatabaseClient): Promise<v
         .where(eq(saves.id, save.id))
         .run()
 
-      // Local hashed embedding — no cloud LLM (MARK-3 web fallback until CoreML/transformers lands).
-      const vector = hashEmbed(result.extractedText || save.title)
       upsertEmbedding(db, save.id, 'warren-hash-v1', vector)
 
       db.update(enrichmentJobs)
@@ -1126,12 +1234,12 @@ function saveSurfacingState(db: DatabaseClient['db'], userId: string, state: Sur
     .run()
 }
 
-function parseLimit(raw: string | undefined): number {
-  const parsed = raw ? Number.parseInt(raw, 10) : 50
+function parseLimit(raw: string | undefined, fallback = 50, max = 100): number {
+  const parsed = raw ? Number.parseInt(raw, 10) : fallback
   if (Number.isNaN(parsed)) {
-    return 50
+    return fallback
   }
-  return Math.min(Math.max(parsed, 1), 100)
+  return Math.min(Math.max(parsed, 1), max)
 }
 
 function mintSaveId(): string {
@@ -1144,4 +1252,124 @@ function unique(values: string[]): string[] {
 
 function isUniqueConstraint(error: unknown): boolean {
   return error instanceof Error && error.message.includes('UNIQUE constraint failed')
+}
+
+/** Cosine similarity between two equal-length vectors. Returns 0 for zero-norm inputs. */
+function cosineSimilarity(a: number[], b: number[]): number {
+  const length = Math.min(a.length, b.length)
+  let dot = 0
+  let normA = 0
+  let normB = 0
+  for (let i = 0; i < length; i += 1) {
+    dot += a[i] * b[i]
+    normA += a[i] * a[i]
+    normB += b[i] * b[i]
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB)
+  return denom === 0 ? 0 : dot / denom
+}
+
+interface EmbeddedSaveRow {
+  save: Save
+  embedding: { vectorJson: string; dims: number }
+}
+
+/** Greedy single-link clustering: seed a cluster with the first unclustered item and
+ * absorb every remaining item whose similarity to that seed exceeds `threshold`. */
+function greedyClusterBySimilarity(rows: EmbeddedSaveRow[], threshold: number): EmbeddedSaveRow[][] {
+  const vectors = rows.map((row) => JSON.parse(row.embedding.vectorJson) as number[])
+  const used = new Array<boolean>(rows.length).fill(false)
+  const clusters: EmbeddedSaveRow[][] = []
+
+  for (let i = 0; i < rows.length; i += 1) {
+    if (used[i]) continue
+    const cluster = [rows[i]]
+    used[i] = true
+    for (let j = i + 1; j < rows.length; j += 1) {
+      if (used[j] || rows[i].embedding.dims !== rows[j].embedding.dims) continue
+      if (cosineSimilarity(vectors[i], vectors[j]) > threshold) {
+        cluster.push(rows[j])
+        used[j] = true
+      }
+    }
+    if (cluster.length >= 2) clusters.push(cluster)
+  }
+
+  return clusters
+}
+
+function suggestConstellationName(members: Save[]): string {
+  const counts = new Map<string, number>()
+  for (const member of members) {
+    for (const tag of parseStringArray(member.tagsJson)) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+  }
+
+  const [topTag, topCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? []
+  if (topTag && (topCount ?? 0) > 1) {
+    return `Similar: ${topTag}`
+  }
+  return `Similar to "${members[0]?.title ?? 'a save'}"`.slice(0, 120)
+}
+
+/** Nearest-neighbor tag boost: borrow tags from the most similar other save (MARK-3). */
+function boostTagsFromNeighbor(
+  db: DatabaseClient['db'],
+  userId: string,
+  saveId: string,
+  vector: number[],
+): string[] {
+  const rows = db
+    .select({ save: saves, embedding: embeddings })
+    .from(embeddings)
+    .innerJoin(saves, eq(embeddings.saveId, saves.id))
+    .where(and(eq(saves.userId, userId), ne(saves.id, saveId)))
+    .all()
+
+  let best: { save: Save; similarity: number } | undefined
+  for (const row of rows) {
+    if (row.embedding.dims !== vector.length) continue
+    const candidate = JSON.parse(row.embedding.vectorJson) as number[]
+    const similarity = cosineSimilarity(vector, candidate)
+    if (!best || similarity > best.similarity) {
+      best = { save: row.save, similarity }
+    }
+  }
+
+  const NEIGHBOR_TAG_THRESHOLD = 0.5
+  if (!best || best.similarity < NEIGHBOR_TAG_THRESHOLD) return []
+  return parseStringArray(best.save.tagsJson)
+}
+
+const MIN_SAVE_TAGS = 2
+const MAX_SAVE_TAGS = 5
+
+/** Ensure every enriched save keeps 2–5 tags (MARK-3 NN tag suggest, min/max clamp). */
+function clampTagCount(tags: string[], save: Pick<Save, 'platform' | 'type'>): string[] {
+  let result = tags
+  if (result.length < MIN_SAVE_TAGS) {
+    result = unique([...result, save.platform, save.type])
+  }
+  return result.slice(0, MAX_SAVE_TAGS)
+}
+
+const SHORT_SUMMARY_MAX_LENGTH = 20
+
+/** First 1–2 sentences (or ~220 chars) of extracted text — zero cloud LLM (MARK-3). */
+function extractiveSummary(text: string, maxChars = 220): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim()
+  if (!cleaned) return ''
+
+  const sentences = cleaned.match(/[^.!?]+[.!?]+(?:\s+|$)/g) ?? [cleaned]
+  let summary = ''
+  for (const sentence of sentences.slice(0, 2)) {
+    const candidate = `${summary}${sentence}`.trim()
+    if (summary && candidate.length > maxChars) break
+    summary = candidate
+    if (summary.length >= maxChars) break
+  }
+
+  if (!summary) summary = cleaned
+  return summary.length > maxChars ? `${summary.slice(0, maxChars).trim()}…` : summary
 }

@@ -474,6 +474,44 @@ describe('sync stream', () => {
     }
   })
 
+  it('ranks related saves by embedding cosine similarity', async () => {
+    const { body: registered } = await register('related@example.com')
+    const a = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Alpha note'))
+    ).json()) as MemoryItemBody
+    const b = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Beta note'))
+    ).json()) as MemoryItemBody
+    const c = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Gamma note'))
+    ).json()) as MemoryItemBody
+
+    const near = [1, 0, 0, 0, 0, 0, 0, 0]
+    const alsoNear = [0.9, 0.1, 0, 0, 0, 0, 0, 0]
+    const far = [0, 0, 0, 0, 0, 0, 0, 1]
+
+    for (const [id, vector] of [
+      [a.id, near],
+      [b.id, alsoNear],
+      [c.id, far],
+    ] as const) {
+      const put = await app.request(`/api/v1/saves/${id}/embedding`, {
+        method: 'PUT',
+        headers: jsonAuthHeaders(registered.token),
+        body: JSON.stringify({ model: 'test', dims: 8, vector }),
+      })
+      expect(put.status).toBe(200)
+    }
+
+    const related = await app.request(`/api/v1/saves/${a.id}/related?limit=2`, {
+      headers: authHeaders(registered.token),
+    })
+    expect(related.status).toBe(200)
+    const body = (await related.json()) as { items: Array<{ id: string; similarity: number }> }
+    expect(body.items[0]?.id).toBe(b.id)
+    expect(body.items[0]?.similarity).toBeGreaterThan(body.items[1]?.similarity ?? 0)
+  })
+
   it('accepts session-cookie authentication', async () => {
     const registered = await register('cookie-stream@example.com')
     const response = await app.request('/api/v1/sync/stream', {
