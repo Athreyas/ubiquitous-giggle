@@ -1,5 +1,6 @@
 import type { LibrarySettings, MemoryItem } from '../types'
-import { listSaves, type Save } from './api/saves'
+import type { Save } from './api/saves'
+import { ApiSavesRepo, LocalSavesRepo } from './repos/savesRepo'
 
 const NO_SUMMARY_YET = 'No summary yet — open it and leave a short note for future you.'
 
@@ -24,19 +25,16 @@ export async function fetchLibrarySaves(
   settings: LibrarySettings,
   limit = 200,
 ): Promise<MemoryItem[]> {
-  const items: MemoryItem[] = []
-  let cursor: string | undefined
-
-  while (items.length < limit) {
-    const { items: page, nextCursor } = await listSaves(settings, {
-      limit: Math.min(50, limit - items.length),
-      archived: false,
-      cursor,
-    })
-    for (const save of page) items.push(toMemoryItem(save))
-    cursor = nextCursor
-    if (!cursor || page.length === 0) break
+  const local = new LocalSavesRepo()
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return (await local.list()).slice(0, limit).map(toMemoryItem)
   }
 
-  return items
+  try {
+    return (await new ApiSavesRepo(settings, local).list(limit)).map(toMemoryItem)
+  } catch (error) {
+    const cached = await local.list()
+    if (cached.length > 0) return cached.slice(0, limit).map(toMemoryItem)
+    throw error
+  }
 }

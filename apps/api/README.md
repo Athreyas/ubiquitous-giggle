@@ -38,14 +38,22 @@ CORS allows the Warren Vite origins `http://127.0.0.1:5173` and
 - `GET /health`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/sync/stream`
 - `GET /api/v1/saves`
 - `POST /api/v1/saves`
 - `POST /api/v1/saves/batch`
 - `GET /api/v1/saves/:id`
 - `PATCH /api/v1/saves/:id`
 - `DELETE /api/v1/saves/:id`
+- `POST /api/v1/saves/:id/links`
+- `GET /api/v1/saves/:id/links`
 - `GET /api/v1/surfacing`
 - `PUT /api/v1/surfacing`
 - `POST /api/v1/surfacing/events`
+
+OAuth is not configured in MARK-2. Adding OAuth still requires provider client IDs/secrets and
+callback configuration; local email/password sessions and rotating refresh tokens require no
+provider keys.

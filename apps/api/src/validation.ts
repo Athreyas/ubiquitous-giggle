@@ -74,6 +74,10 @@ export const embeddingUpsertSchema = z.object({
   vector: z.array(z.number()).min(8).max(4096),
 })
 
+export const createSaveLinkSchema = z.object({
+  toSaveId: z.string().trim().min(1).max(128),
+})
+
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type CreateSaveInput = z.infer<typeof createSaveSchema>

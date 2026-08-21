@@ -8,7 +8,8 @@ import { DetailModal } from './components/DetailModal'
 import { SettingsPanel } from './components/SettingsPanel'
 import { DEMO_ITEMS } from './lib/demoData'
 import { fetchLibrarySaves } from './lib/api'
-import { getSurfacing, postSurfacingEvent, putSurfacing } from './lib/api/surfacing'
+import { normalizeBaseUrl } from './lib/api/client'
+import { ApiSurfacingRepo } from './lib/repos/surfacingRepo'
 import { markDismissed, markOpened, markSurfaced, selectDailyMemories, todayKey } from './lib/selection'
 import { loadSettings, loadSurfacing, saveSettings, saveSurfacing } from './lib/storage'
 import type { LibrarySettings, MemoryItem, SurfacingState } from './types'
@@ -29,7 +30,7 @@ export default function App() {
   const emitSurfacingEvent = useCallback(
     (type: 'surfaced' | 'opened' | 'dismissed', saveId: string) => {
       if (!canSync) return
-      void postSurfacingEvent(settings, { type, saveId, at: new Date().toISOString() }).catch(
+      void new ApiSurfacingRepo(settings).postEvent({ type, saveId, at: new Date().toISOString() }).catch(
         () => {
           // Best-effort telemetry — safe to drop if the API is unreachable.
         },
@@ -41,11 +42,10 @@ export default function App() {
   const persistSurfacing = useCallback(
     (next: SurfacingState) => {
       setSurfacing(next)
-      saveSurfacing(next)
       if (canSync) {
-        void putSurfacing(settings, next).catch(() => {
-          // Best-effort sync — the local cache remains the source of truth on failure.
-        })
+        void new ApiSurfacingRepo(settings).put(next).catch(() => {})
+      } else {
+        saveSurfacing(next)
       }
     },
     [canSync, settings],
@@ -55,11 +55,11 @@ export default function App() {
   useEffect(() => {
     if (!canSync) return
     let cancelled = false
-    getSurfacing(settings)
+    new ApiSurfacingRepo(settings)
+      .get()
       .then((remote) => {
         if (cancelled) return
         setSurfacing(remote)
-        saveSurfacing(remote)
       })
       .catch(() => {
         // Keep using the local cache if the API is unreachable.
@@ -97,6 +97,24 @@ export default function App() {
     void loadLibrary()
   }, [loadLibrary])
 
+  // Cookie-authenticated EventSource keeps multiple signed-in tabs/devices fresh.
+  useEffect(() => {
+    if (!canSync || typeof EventSource === 'undefined') return
+    const stream = new EventSource(`${normalizeBaseUrl(settings.apiBaseUrl)}/api/v1/sync/stream`, {
+      withCredentials: true,
+    })
+    const refreshSaves = () => void loadLibrary()
+    const refreshSurfacing = () => {
+      void new ApiSurfacingRepo(settings)
+        .get()
+        .then(setSurfacing)
+        .catch(() => {})
+    }
+    stream.addEventListener('saves', refreshSaves)
+    stream.addEventListener('surfacing', refreshSurfacing)
+    return () => stream.close()
+  }, [canSync, loadLibrary, settings])
+
   const spotlight = useMemo(
     () => selectDailyMemories(library, surfacing, { count: 2, shuffleSalt }),
     [library, surfacing, shuffleSalt],
@@ -120,8 +138,8 @@ export default function App() {
       const same = current.length === ids.length && current.every((id, i) => id === ids[i])
       if (same) return prev
       const next = markSurfaced(prev, ids)
-      saveSurfacing(next)
-      if (canSync) void putSurfacing(settings, next).catch(() => {})
+      if (canSync) void new ApiSurfacingRepo(settings).put(next).catch(() => {})
+      else saveSurfacing(next)
       for (const id of ids) emitSurfacingEvent('surfaced', id)
       return next
     })

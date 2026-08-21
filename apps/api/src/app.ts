@@ -14,6 +14,7 @@ import { createDatabase, type DatabaseClient } from './db.js'
 import {
   embeddings,
   enrichmentJobs,
+  saveLinks,
   saves,
   spaces,
   surfacingState,
@@ -21,10 +22,12 @@ import {
   users,
   type EnrichmentJob,
   type Save,
+  type SaveLink,
   type User,
 } from './schema.js'
 import {
   batchSavesSchema,
+  createSaveLinkSchema,
   createSaveSchema,
   embeddingUpsertSchema,
   loginSchema,
@@ -45,6 +48,8 @@ const defaultSpaces = [
   { name: 'Work', slug: 'work', position: 1 },
   { name: 'Learning', slug: 'learning', position: 2 },
 ] as const
+const syncClients = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>()
+const sseEncoder = new TextEncoder()
 
 const defaultSurfacingState = (): SurfacingState => ({
   byDay: {},
@@ -249,7 +254,73 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     return c.body(null, 204)
   })
 
+  app.post('/api/v1/auth/refresh', requireAuth, (c) => {
+    const user = c.get('user')
+    const oldTokenHash = c.get('tokenHash')
+    const token = createToken()
+    const now = new Date().toISOString()
+
+    db.transaction((tx) => {
+      tx.delete(tokens).where(eq(tokens.tokenHash, oldTokenHash)).run()
+      tx.insert(tokens)
+        .values({
+          tokenHash: hashToken(token),
+          userId: user.id,
+          expiresAt: tokenExpiry(),
+          createdAt: now,
+        })
+        .run()
+    })
+
+    setSessionCookie(c, token)
+    return c.json({ user, token })
+  })
+
   app.get('/api/v1/auth/me', requireAuth, (c) => c.json(c.get('user')))
+
+  app.get('/api/v1/sync/stream', requireAuth, (c) => {
+    const userId = c.get('user').id
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+
+    const cleanup = () => {
+      if (heartbeat) clearInterval(heartbeat)
+      if (!controller) return
+      const clients = syncClients.get(userId)
+      clients?.delete(controller)
+      if (clients?.size === 0) syncClients.delete(userId)
+    }
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController
+        let clients = syncClients.get(userId)
+        if (!clients) {
+          clients = new Set()
+          syncClients.set(userId, clients)
+        }
+        clients.add(nextController)
+        nextController.enqueue(sseEncoder.encode(': connected\n\n'))
+        heartbeat = setInterval(() => {
+          try {
+            nextController.enqueue(sseEncoder.encode(': heartbeat\n\n'))
+          } catch {
+            cleanup()
+          }
+        }, 25_000)
+      },
+      cancel: cleanup,
+    })
+
+    return new Response(stream, {
+      headers: {
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'Content-Type': 'text/event-stream',
+        'X-Accel-Buffering': 'no',
+      },
+    })
+  })
 
   app.get('/api/v1/assets/:id', requireAuth, (c) => {
     const row = getSaveForUser(db, c.get('user').id, c.req.param('id'))
@@ -309,6 +380,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
 
     db.insert(saves).values(row).run()
     enqueueEnrichment(row.id)
+    publishSyncEvent(row.userId, 'saves')
 
     return c.json(toMemoryItem(row), 201)
   })
@@ -348,6 +420,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
 
     db.insert(saves).values(row).run()
     enqueueEnrichment(row.id)
+    publishSyncEvent(row.userId, 'saves')
 
     return c.json(toMemoryItem(row), 201)
   })
@@ -386,6 +459,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     for (const id of result.ids) {
       enqueueEnrichment(id)
     }
+    publishSyncEvent(user.id, 'saves')
 
     return c.json(result)
   })
@@ -410,6 +484,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
       .set(buildSaveUpdate(input, new Date().toISOString(), existing.createdAt))
       .where(and(eq(saves.userId, user.id), eq(saves.id, existing.id)))
       .run()
+    publishSyncEvent(user.id, 'saves')
 
     const updated = getSaveForUser(db, user.id, existing.id)
     return c.json(toMemoryItem(updated ?? existing))
@@ -423,8 +498,56 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     if (result.changes === 0) {
       throw new HTTPException(404, { message: 'Save not found.' })
     }
+    publishSyncEvent(c.get('user').id, 'saves')
 
     return c.body(null, 204)
+  })
+
+  app.post('/api/v1/saves/:id/links', requireAuth, async (c) => {
+    const user = c.get('user')
+    const fromSave = getSaveForUser(db, user.id, c.req.param('id'))
+    if (!fromSave) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+    const input = await readJson(c, createSaveLinkSchema)
+    const toSave = getSaveForUser(db, user.id, input.toSaveId)
+    if (!toSave) {
+      throw new HTTPException(404, { message: 'Linked save not found.' })
+    }
+
+    const link = {
+      id: `lnk_${randomUUID()}`,
+      userId: user.id,
+      fromSaveId: fromSave.id,
+      toSaveId: toSave.id,
+      createdAt: new Date().toISOString(),
+    }
+    try {
+      db.insert(saveLinks).values(link).run()
+    } catch (error) {
+      if (isUniqueConstraint(error)) {
+        throw new HTTPException(409, { message: 'These saves are already linked.' })
+      }
+      throw error
+    }
+
+    return c.json(toSaveLink(link), 201)
+  })
+
+  app.get('/api/v1/saves/:id/links', requireAuth, (c) => {
+    const user = c.get('user')
+    const fromSave = getSaveForUser(db, user.id, c.req.param('id'))
+    if (!fromSave) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+
+    const rows = db
+      .select()
+      .from(saveLinks)
+      .where(and(eq(saveLinks.userId, user.id), eq(saveLinks.fromSaveId, fromSave.id)))
+      .orderBy(desc(saveLinks.createdAt))
+      .all()
+    return c.json({ items: rows.map(toSaveLink) })
   })
 
   app.get('/api/v1/enrichment/:saveId', requireAuth, (c) => {
@@ -484,6 +607,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
   app.put('/api/v1/surfacing', requireAuth, async (c) => {
     const state = await readJson(c, surfacingStateSchema)
     saveSurfacingState(db, c.get('user').id, state)
+    publishSyncEvent(c.get('user').id, 'surfacing')
     return c.json(state)
   })
 
@@ -508,6 +632,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     }
 
     saveSurfacingState(db, c.get('user').id, state)
+    publishSyncEvent(c.get('user').id, 'surfacing')
     return c.json(state)
   })
 
@@ -707,6 +832,32 @@ function toMemoryItem(row: Save): MemoryItem {
     ...(row.extractedText ? { extractedText: row.extractedText } : {}),
     ...(row.keywordsJson ? { keywords: parseStringArray(row.keywordsJson) } : {}),
   }
+}
+
+function toSaveLink(row: SaveLink) {
+  return {
+    id: row.id,
+    fromSaveId: row.fromSaveId,
+    toSaveId: row.toSaveId,
+    createdAt: row.createdAt,
+  }
+}
+
+function publishSyncEvent(userId: string, event: 'saves' | 'surfacing'): void {
+  const clients = syncClients.get(userId)
+  if (!clients?.size) return
+
+  const payload = sseEncoder.encode(
+    `event: ${event}\ndata: ${JSON.stringify({ updatedAt: new Date().toISOString() })}\n\n`,
+  )
+  for (const controller of clients) {
+    try {
+      controller.enqueue(payload)
+    } catch {
+      clients.delete(controller)
+    }
+  }
+  if (clients.size === 0) syncClients.delete(userId)
 }
 
 function toEnrichmentStatus(job: EnrichmentJob) {

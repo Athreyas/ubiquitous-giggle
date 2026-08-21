@@ -41,3 +41,8 @@ export async function logout(settings: LibrarySettings): Promise<void> {
 export function me(settings: LibrarySettings): Promise<User> {
   return apiFetch<User>(settings, '/api/v1/auth/me')
 }
+
+/** Rotates the active cookie/Bearer session and returns the replacement token. */
+export function refresh(settings: LibrarySettings): Promise<AuthResult> {
+  return apiFetch<AuthResult>(settings, '/api/v1/auth/refresh', { method: 'POST' })
+}

@@ -121,6 +121,49 @@ describe('auth', () => {
       ['Learning', 'learning', 2],
     ])
   })
+
+  it('rotates a valid session token and invalidates the previous token', async () => {
+    const registered = await register('refresh@example.com')
+    const refresh = await app.request('/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { cookie: cookieHeader(registered.response.headers.get('set-cookie')) },
+    })
+
+    expect(refresh.status).toBe(200)
+    const refreshed = (await refresh.json()) as AuthBody
+    expect(refreshed.token).toMatch(/^[a-f0-9]{64}$/)
+    expect(refreshed.token).not.toBe(registered.body.token)
+    expect(refresh.headers.get('set-cookie')).toContain(`warren_session=${refreshed.token}`)
+
+    const oldSession = await app.request('/api/v1/auth/me', {
+      headers: authHeaders(registered.body.token),
+    })
+    expect(oldSession.status).toBe(401)
+
+    const newSession = await app.request('/api/v1/auth/me', {
+      headers: authHeaders(refreshed.token),
+    })
+    expect(newSession.status).toBe(200)
+  })
+})
+
+describe('schema migration', () => {
+  it('creates the MARK-2 graph and sharing tables', () => {
+    const rows = database.sqlite
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?) ORDER BY name",
+      )
+      .all('constellations', 'constellation_members', 'shares', 'save_links') as Array<{
+      name: string
+    }>
+
+    expect(rows.map((row) => row.name)).toEqual([
+      'constellation_members',
+      'constellations',
+      'save_links',
+      'shares',
+    ])
+  })
 })
 
 describe('saves', () => {
@@ -329,6 +372,96 @@ describe('saves', () => {
       vector,
     })
   })
+
+  it('creates and lists links only between saves owned by the user', async () => {
+    const { body: registered } = await register('links@example.com')
+    const first = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('First'))
+    ).json()) as MemoryItemBody
+    const second = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Second'))
+    ).json()) as MemoryItemBody
+
+    const createLink = await postJson(`/api/v1/saves/${first.id}/links`, registered.token, {
+      toSaveId: second.id,
+    })
+    expect(createLink.status).toBe(201)
+    await expect(createLink.json()).resolves.toMatchObject({
+      id: expect.stringMatching(/^lnk_/),
+      fromSaveId: first.id,
+      toSaveId: second.id,
+      createdAt: expect.any(String),
+    })
+
+    const listLinks = await app.request(`/api/v1/saves/${first.id}/links`, {
+      headers: authHeaders(registered.token),
+    })
+    expect(listLinks.status).toBe(200)
+    await expect(listLinks.json()).resolves.toMatchObject({
+      items: [expect.objectContaining({ fromSaveId: first.id, toSaveId: second.id })],
+    })
+
+    const duplicate = await postJson(`/api/v1/saves/${first.id}/links`, registered.token, {
+      toSaveId: second.id,
+    })
+    expect(duplicate.status).toBe(409)
+
+    const { body: other } = await register('other-links@example.com')
+    const foreign = (await (
+      await postJson('/api/v1/saves', other.token, saveInput('Foreign'))
+    ).json()) as MemoryItemBody
+    const crossUser = await postJson(`/api/v1/saves/${first.id}/links`, registered.token, {
+      toSaveId: foreign.id,
+    })
+    expect(crossUser.status).toBe(404)
+  })
+})
+
+describe('sync stream', () => {
+  it('emits saves and surfacing events for authenticated mutations', async () => {
+    const registered = await register('stream@example.com')
+    const streamResponse = await app.request('/api/v1/sync/stream', {
+      headers: authHeaders(registered.body.token),
+    })
+    expect(streamResponse.status).toBe(200)
+    expect(streamResponse.headers.get('content-type')).toContain('text/event-stream')
+
+    const reader = streamResponse.body?.getReader()
+    expect(reader).toBeTruthy()
+    if (!reader) return
+
+    try {
+      await expect(readStreamChunk(reader)).resolves.toBe(': connected\n\n')
+
+      const create = await postJson('/api/v1/saves', registered.body.token, saveInput('Streamed'))
+      expect(create.status).toBe(201)
+      await expect(readStreamChunk(reader)).resolves.toMatch(
+        /^event: saves\ndata: \{"updatedAt":"[^"]+"\}\n\n$/,
+      )
+
+      const put = await app.request('/api/v1/surfacing', {
+        method: 'PUT',
+        headers: jsonAuthHeaders(registered.body.token),
+        body: JSON.stringify({
+          byDay: {},
+          lastSurfaced: {},
+          lastOpened: {},
+          dismissed: [],
+        }),
+      })
+      expect(put.status).toBe(200)
+      await expect(readStreamChunk(reader)).resolves.toMatch(
+        /^event: surfacing\ndata: \{"updatedAt":"[^"]+"\}\n\n$/,
+      )
+    } finally {
+      await reader.cancel()
+    }
+  })
+
+  it('requires authentication', async () => {
+    const response = await app.request('/api/v1/sync/stream')
+    expect(response.status).toBe(401)
+  })
 })
 
 async function register(email: string) {
@@ -359,4 +492,22 @@ async function postJson(path: string, token: string, body: unknown): Promise<Res
     headers: jsonAuthHeaders(token),
     body: JSON.stringify(body),
   })
+}
+
+function saveInput(title: string) {
+  return {
+    type: 'text',
+    title,
+    summary: `${title} summary`,
+    tags: ['test'],
+    platform: 'note',
+  }
+}
+
+async function readStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<string> {
+  const result = await reader.read()
+  expect(result.done).toBe(false)
+  return new TextDecoder().decode(result.value)
 }
