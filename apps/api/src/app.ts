@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { and, desc, eq, lt, ne, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, lt, ne, type SQL } from 'drizzle-orm'
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { createMiddleware } from 'hono/factory'
@@ -10,7 +10,7 @@ import { HTTPException } from 'hono/http-exception'
 import type { z } from 'zod'
 
 import { createToken, hashPassword, hashToken, tokenExpiry, verifyPassword } from './auth.js'
-import { createDatabase, type DatabaseClient } from './db.js'
+import { createDatabase, type DatabaseClient, type WarrenDatabase } from './db.js'
 import {
   constellationMembers,
   constellations,
@@ -31,9 +31,11 @@ import {
   batchSavesSchema,
   createSaveLinkSchema,
   createSaveSchema,
+  createSpaceSchema,
   embeddingUpsertSchema,
   loginSchema,
   patchSaveSchema,
+  patchSpaceSchema,
   registerSchema,
   surfacingEventSchema,
   surfacingStateSchema,
@@ -78,6 +80,7 @@ interface MemoryItem {
   platform: 'youtube' | 'instagram' | 'tiktok' | 'article' | 'note' | 'other'
   createdAt: string
   archived: boolean
+  spaceId?: string
   extractedText?: string
   keywords?: string[]
 }
@@ -278,6 +281,172 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     return c.json({ user, token })
   })
 
+  app.get('/api/v1/spaces', requireAuth, (c) => {
+    const rows = db
+      .select()
+      .from(spaces)
+      .where(eq(spaces.userId, c.get('user').id))
+      .orderBy(asc(spaces.position))
+      .all()
+    return c.json({
+      items: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        position: row.position,
+        createdAt: row.createdAt,
+      })),
+    })
+  })
+
+  app.post('/api/v1/spaces', requireAuth, async (c) => {
+    const input = await readJson(c, createSpaceSchema)
+    const user = c.get('user')
+    const now = new Date().toISOString()
+    const maxPos =
+      db
+        .select()
+        .from(spaces)
+        .where(eq(spaces.userId, user.id))
+        .orderBy(desc(spaces.position))
+        .get()?.position ?? -1
+    const slug = input.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || `space-${Date.now()}`
+    const row = {
+      id: `spc_${randomUUID()}`,
+      userId: user.id,
+      name: input.name,
+      slug: `${slug}-${randomUUID().slice(0, 6)}`,
+      position: maxPos + 1,
+      createdAt: now,
+    }
+    db.insert(spaces).values(row).run()
+    return c.json(
+      { id: row.id, name: row.name, slug: row.slug, position: row.position, createdAt: row.createdAt },
+      201,
+    )
+  })
+
+  app.patch('/api/v1/spaces/:id', requireAuth, async (c) => {
+    const input = await readJson(c, patchSpaceSchema)
+    const user = c.get('user')
+    const existing = db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.userId, user.id), eq(spaces.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Space not found.' })
+    db.update(spaces)
+      .set({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.position !== undefined ? { position: input.position } : {}),
+      })
+      .where(eq(spaces.id, existing.id))
+      .run()
+    const updated = db.select().from(spaces).where(eq(spaces.id, existing.id)).get()!
+    return c.json({
+      id: updated.id,
+      name: updated.name,
+      slug: updated.slug,
+      position: updated.position,
+      createdAt: updated.createdAt,
+    })
+  })
+
+  app.delete('/api/v1/spaces/:id', requireAuth, (c) => {
+    const user = c.get('user')
+    const existing = db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.userId, user.id), eq(spaces.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Space not found.' })
+    const personal = db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.userId, user.id), eq(spaces.slug, 'personal')))
+      .get()
+    db.transaction((tx) => {
+      tx.update(saves)
+        .set({ spaceId: personal?.id ?? null, updatedAt: new Date().toISOString() })
+        .where(and(eq(saves.userId, user.id), eq(saves.spaceId, existing.id)))
+        .run()
+      tx.delete(spaces).where(eq(spaces.id, existing.id)).run()
+    })
+    return c.body(null, 204)
+  })
+
+  app.get('/api/v1/search', requireAuth, (c) => {
+    const user = c.get('user')
+    const q = (c.req.query('q') ?? '').trim().toLowerCase()
+    const limit = parseLimit(c.req.query('limit'), 20, 50)
+    const spaceId = c.req.query('spaceId')
+    if (!q) return c.json({ items: [] })
+
+    const filters: SQL[] = [eq(saves.userId, user.id), eq(saves.archived, 0)]
+    if (spaceId) filters.push(eq(saves.spaceId, spaceId))
+
+    const rows = db
+      .select()
+      .from(saves)
+      .where(and(...filters))
+      .orderBy(desc(saves.updatedAt))
+      .all()
+
+    const queryVector = hashEmbed(q)
+    const saveIds = new Set(rows.map((row) => row.id))
+    const embeddingBySave = new Map(
+      db
+        .select()
+        .from(embeddings)
+        .all()
+        .filter((row) => saveIds.has(row.saveId))
+        .map((row) => [row.saveId, row] as const),
+    )
+
+    const scored = rows
+      .map((row) => {
+        const hay = [row.title, row.summary, row.note, row.url, row.tagsJson, row.extractedText]
+          .filter(Boolean)
+          .join('\n')
+          .toLowerCase()
+        let keywordScore = 0
+        if (row.title.toLowerCase().includes(q)) keywordScore += 5
+        if (hay.includes(q)) keywordScore += 2
+        for (const part of q.split(/\s+/).filter(Boolean)) {
+          if (hay.includes(part)) keywordScore += 1
+        }
+
+        let semanticScore = 0
+        const embedding = embeddingBySave.get(row.id)
+        if (embedding && embedding.dims === queryVector.length) {
+          semanticScore = cosineSimilarity(
+            queryVector,
+            JSON.parse(embedding.vectorJson) as number[],
+          )
+        }
+
+        // Hybrid: keyword dominates exact matches; semantic lifts vague NL queries.
+        const score = keywordScore + semanticScore * 4
+        return { row, score, keywordScore, semanticScore }
+      })
+      .filter((entry) => entry.score > 0.15)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+
+    return c.json({
+      items: scored.map((entry) => ({
+        ...toMemoryItem(entry.row),
+        score: entry.score,
+        keywordScore: entry.keywordScore,
+        semanticScore: entry.semanticScore,
+      })),
+    })
+  })
+
   app.get('/api/v1/auth/me', requireAuth, (c) => c.json(c.get('user')))
 
   app.get('/api/v1/sync/stream', requireAuth, (c) => {
@@ -354,10 +523,14 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     const limit = parseLimit(c.req.query('limit'))
     const cursor = c.req.query('cursor')
     const archived = c.req.query('archived') ?? 'false'
+    const spaceId = c.req.query('spaceId')
     const filters: SQL[] = [eq(saves.userId, user.id)]
 
     if (archived !== 'all') {
       filters.push(eq(saves.archived, archived === 'true' ? 1 : 0))
+    }
+    if (spaceId) {
+      filters.push(eq(saves.spaceId, spaceId))
     }
     if (cursor) {
       filters.push(lt(saves.createdAt, cursor))
@@ -378,7 +551,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
 
   app.post('/api/v1/saves', requireAuth, async (c) => {
     const input = await readJson(c, createSaveSchema)
-    const row = buildSaveInsert(c.get('user').id, input)
+    const row = buildSaveInsert(db, c.get('user').id, input)
 
     db.insert(saves).values(row).run()
     enqueueEnrichment(row.id)
@@ -401,10 +574,16 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     writeFileSync(assetPath, Buffer.from(await file.arrayBuffer()))
 
     const note = firstString(body.note)
+    const personalSpaceId =
+      db
+        .select()
+        .from(spaces)
+        .where(and(eq(spaces.userId, user.id), eq(spaces.slug, 'personal')))
+        .get()?.id ?? null
     const row: Save = {
       id,
       userId: user.id,
-      spaceId: null,
+      spaceId: personalSpaceId,
       type: 'asset',
       title: firstString(body.title) ?? file.name ?? 'Uploaded asset',
       url: `/api/v1/assets/${id}`,
@@ -450,7 +629,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
             .run()
           updated += 1
         } else {
-          tx.insert(saves).values(buildSaveInsert(user.id, { ...item, id })).run()
+          tx.insert(saves).values(buildSaveInsert(tx, user.id, { ...item, id })).run()
           created += 1
         }
         ids.push(id)
@@ -641,15 +820,30 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
   app.post('/api/v1/clustering/run', requireAuth, (c) => {
     const user = c.get('user')
     const threshold = 0.82
+    const spaceId = c.req.query('spaceId')
+
+    const filters: SQL[] = [eq(saves.userId, user.id), eq(saves.archived, 0)]
+    if (spaceId) filters.push(eq(saves.spaceId, spaceId))
 
     const rows = db
       .select({ save: saves, embedding: embeddings })
       .from(saves)
       .innerJoin(embeddings, eq(embeddings.saveId, saves.id))
-      .where(and(eq(saves.userId, user.id), eq(saves.archived, 0)))
+      .where(and(...filters))
       .all()
 
-    const clusters = greedyClusterBySimilarity(rows, threshold)
+    // Space-aware: never merge saves across spaces unless the caller asked for one space.
+    const bySpace = new Map<string, typeof rows>()
+    for (const row of rows) {
+      const key = row.save.spaceId ?? '__unsorted__'
+      const bucket = bySpace.get(key) ?? []
+      bucket.push(row)
+      bySpace.set(key, bucket)
+    }
+
+    const clusters = [...bySpace.values()].flatMap((bucket) =>
+      greedyClusterBySimilarity(bucket, threshold),
+    )
     const now = new Date().toISOString()
 
     const suggestions = clusters.map((cluster) => ({
@@ -869,12 +1063,21 @@ function toPublicUser(user: User): PublicUser {
   }
 }
 
-function buildSaveInsert(userId: string, input: CreateSaveInput): Save {
+function buildSaveInsert(db: WarrenDatabase, userId: string, input: CreateSaveInput): Save {
   const now = new Date().toISOString()
+  let spaceId = input.spaceId ?? null
+  if (spaceId === null && input.spaceId === undefined) {
+    spaceId =
+      db
+        .select()
+        .from(spaces)
+        .where(and(eq(spaces.userId, userId), eq(spaces.slug, 'personal')))
+        .get()?.id ?? null
+  }
   return {
     id: input.id ?? mintSaveId(),
     userId,
-    spaceId: input.spaceId ?? null,
+    spaceId,
     type: input.type,
     title: input.title,
     url: input.url ?? null,
@@ -927,6 +1130,7 @@ function toMemoryItem(row: Save): MemoryItem {
     platform: row.platform as MemoryItem['platform'],
     createdAt: row.createdAt,
     archived: Boolean(row.archived),
+    ...(row.spaceId ? { spaceId: row.spaceId } : {}),
     ...(row.extractedText ? { extractedText: row.extractedText } : {}),
     ...(row.keywordsJson ? { keywords: parseStringArray(row.keywordsJson) } : {}),
   }

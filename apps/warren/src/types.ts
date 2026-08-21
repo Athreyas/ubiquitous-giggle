@@ -48,10 +48,15 @@ export interface LibrarySettings {
   useDemo: boolean
   apiBaseUrl: string
   token: string
+  /**
+   * Active space filter. `null` = All spaces.
+   * When set, library/search/echo are scoped to that space.
+   */
+  activeSpaceId: string | null
 }
 
 export const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8787'
 
 export function defaultLibrarySettings(): LibrarySettings {
-  return { useDemo: true, apiBaseUrl: DEFAULT_API_BASE_URL, token: '' }
+  return { useDemo: true, apiBaseUrl: DEFAULT_API_BASE_URL, token: '', activeSpaceId: null }
 }

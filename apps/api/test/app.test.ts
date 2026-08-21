@@ -122,6 +122,95 @@ describe('auth', () => {
     ])
   })
 
+  it('lists, creates, renames, and deletes spaces via the API', async () => {
+    const { body: registered } = await register('space-api@example.com')
+    const listed = await app.request('/api/v1/spaces', {
+      headers: authHeaders(registered.token),
+    })
+    expect(listed.status).toBe(200)
+    const before = (await listed.json()) as {
+      items: Array<{ id: string; name: string; slug: string }>
+    }
+    expect(before.items).toHaveLength(3)
+
+    const created = await postJson('/api/v1/spaces', registered.token, { name: 'Side projects' })
+    expect(created.status).toBe(201)
+    const space = (await created.json()) as { id: string; name: string }
+    expect(space.name).toBe('Side projects')
+
+    const patched = await app.request(`/api/v1/spaces/${space.id}`, {
+      method: 'PATCH',
+      headers: jsonAuthHeaders(registered.token),
+      body: JSON.stringify({ name: 'Side Projects' }),
+    })
+    expect(patched.status).toBe(200)
+    await expect(patched.json()).resolves.toMatchObject({ name: 'Side Projects' })
+
+    const deleted = await app.request(`/api/v1/spaces/${space.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(registered.token),
+    })
+    expect(deleted.status).toBe(204)
+  })
+
+  it('filters saves by space and hybrid-searches within a space', async () => {
+    const { body: registered } = await register('search-space@example.com')
+    const listed = await app.request('/api/v1/spaces', {
+      headers: authHeaders(registered.token),
+    })
+    const spaceItems = (
+      (await listed.json()) as { items: Array<{ id: string; slug: string }> }
+    ).items
+    const personal = spaceItems.find((space) => space.slug === 'personal')!
+    const work = spaceItems.find((space) => space.slug === 'work')!
+
+    const personalSave = await postJson('/api/v1/saves', registered.token, {
+      ...saveInput('Personal gardening notes'),
+      spaceId: personal.id,
+    })
+    const workSave = await postJson('/api/v1/saves', registered.token, {
+      ...saveInput('Work quarterly planning'),
+      spaceId: work.id,
+    })
+    expect(personalSave.status).toBe(201)
+    expect(workSave.status).toBe(201)
+
+    const filtered = await app.request(`/api/v1/saves?spaceId=${work.id}`, {
+      headers: authHeaders(registered.token),
+    })
+    expect(filtered.status).toBe(200)
+    const workOnly = (await filtered.json()) as { items: MemoryItemBody[] }
+    expect(workOnly.items).toHaveLength(1)
+    expect(workOnly.items[0]?.title).toBe('Work quarterly planning')
+
+    const search = await app.request(`/api/v1/search?q=gardening&spaceId=${personal.id}`, {
+      headers: authHeaders(registered.token),
+    })
+    expect(search.status).toBe(200)
+    const hits = (await search.json()) as { items: MemoryItemBody[] }
+    expect(hits.items.map((item) => item.title)).toEqual(['Personal gardening notes'])
+
+    const leak = await app.request(`/api/v1/search?q=gardening&spaceId=${work.id}`, {
+      headers: authHeaders(registered.token),
+    })
+    const leakHits = (await leak.json()) as { items: MemoryItemBody[] }
+    expect(leakHits.items).toHaveLength(0)
+  })
+
+  it('defaults new saves into the personal space when spaceId is omitted', async () => {
+    const { body: registered } = await register('default-space@example.com')
+    const created = await postJson('/api/v1/saves', registered.token, saveInput('No space set'))
+    expect(created.status).toBe(201)
+    const save = (await created.json()) as MemoryItemBody & { spaceId?: string }
+    const personal = database.db
+      .select()
+      .from(spaces)
+      .where(eq(spaces.userId, registered.user.id))
+      .all()
+      .find((space) => space.slug === 'personal')
+    expect(save.spaceId).toBe(personal?.id)
+  })
+
   it('rotates a valid session token and invalidates the previous token', async () => {
     const registered = await register('refresh@example.com')
     const refresh = await app.request('/api/v1/auth/refresh', {
@@ -530,6 +619,127 @@ describe('sync stream', () => {
     expect(response.status).toBe(401)
   })
 })
+
+describe('enrichment worker', () => {
+  it('backfills an extractive summary and clamps tags between 2 and 5', async () => {
+    app = createApp({ database, assetRoot: join(tempDir, 'assets'), enableEnrichmentWorker: true })
+    const { body: registered } = await register('enrich-worker@example.com')
+
+    const create = await postJson('/api/v1/saves', registered.token, {
+      type: 'text',
+      title: 'Local-first sync notes',
+      summary: '',
+      note:
+        'Local-first sync patterns keep data on-device first. CRDTs resolve conflicts without a central server. ' +
+        'Offline queues replay writes once connectivity returns.',
+      tags: [],
+      platform: 'note',
+    })
+    expect(create.status).toBe(201)
+    const created = (await create.json()) as MemoryItemBody
+
+    const job = await waitForEnrichmentDone(registered.token, created.id)
+    expect(job.status).toBe('done')
+
+    const fetched = await app.request(`/api/v1/saves/${created.id}`, {
+      headers: authHeaders(registered.token),
+    })
+    const item = (await fetched.json()) as MemoryItemBody & { summary: string }
+
+    expect(item.summary.trim().length).toBeGreaterThan(0)
+    expect(item.summary.length).toBeLessThanOrEqual(221)
+    expect(item.tags?.length ?? 0).toBeGreaterThanOrEqual(2)
+    expect(item.tags?.length ?? 0).toBeLessThanOrEqual(5)
+  })
+
+  it('leaves an already-descriptive summary untouched', async () => {
+    app = createApp({ database, assetRoot: join(tempDir, 'assets'), enableEnrichmentWorker: true })
+    const { body: registered } = await register('enrich-keep-summary@example.com')
+
+    const original = 'A hand-written summary long enough that enrichment should not replace it.'
+    const create = await postJson('/api/v1/saves', registered.token, {
+      type: 'text',
+      title: 'Keep my summary',
+      summary: original,
+      note: 'Extra body text used only for keyword extraction, not for the summary itself.',
+      tags: ['keep'],
+      platform: 'note',
+    })
+    const created = (await create.json()) as MemoryItemBody
+
+    await waitForEnrichmentDone(registered.token, created.id)
+
+    const fetched = await app.request(`/api/v1/saves/${created.id}`, {
+      headers: authHeaders(registered.token),
+    })
+    const item = (await fetched.json()) as { summary: string }
+    expect(item.summary).toBe(original)
+  })
+})
+
+describe('clustering', () => {
+  it('greedily groups saves whose embeddings are highly similar', async () => {
+    const { body: registered } = await register('clustering@example.com')
+    const first = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Cluster A'))
+    ).json()) as MemoryItemBody
+    const second = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Cluster B'))
+    ).json()) as MemoryItemBody
+    const outlier = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Lonely note'))
+    ).json()) as MemoryItemBody
+
+    const tight = [1, 0, 0, 0, 0, 0, 0, 0]
+    const almostTight = [0.99, 0.01, 0, 0, 0, 0, 0, 0]
+    const different = [0, 1, 0, 0, 0, 0, 0, 0]
+
+    for (const [id, vector] of [
+      [first.id, tight],
+      [second.id, almostTight],
+      [outlier.id, different],
+    ] as const) {
+      const put = await app.request(`/api/v1/saves/${id}/embedding`, {
+        method: 'PUT',
+        headers: jsonAuthHeaders(registered.token),
+        body: JSON.stringify({ model: 'test', dims: 8, vector }),
+      })
+      expect(put.status).toBe(200)
+    }
+
+    const run = await app.request('/api/v1/clustering/run', {
+      method: 'POST',
+      headers: authHeaders(registered.token),
+    })
+    expect(run.status).toBe(200)
+    const body = (await run.json()) as {
+      suggestions: Array<{ memberIds: string[]; size: number }>
+      persisted: boolean
+    }
+
+    expect(body.suggestions).toHaveLength(1)
+    expect(body.suggestions[0]?.memberIds.sort()).toEqual([first.id, second.id].sort())
+    expect(body.suggestions[0]?.size).toBe(2)
+    expect(body.persisted).toBe(true)
+  })
+})
+
+async function waitForEnrichmentDone(
+  token: string,
+  saveId: string,
+  timeoutMs = 4000,
+): Promise<{ status: string }> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const res = await app.request(`/api/v1/enrichment/${saveId}`, {
+      headers: authHeaders(token),
+    })
+    const body = (await res.json()) as { status: string }
+    if (body.status === 'done' || body.status === 'failed') return body
+    await new Promise((resolve) => setTimeout(resolve, 15))
+  }
+  throw new Error('Enrichment job did not complete in time.')
+}
 
 async function register(email: string) {
   const response = await app.request('/api/v1/auth/register', {

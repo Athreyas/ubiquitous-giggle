@@ -26,15 +26,25 @@ export async function fetchLibrarySaves(
   limit = 200,
 ): Promise<MemoryItem[]> {
   const local = new LocalSavesRepo()
+  const spaceId = settings.activeSpaceId
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return (await local.list()).slice(0, limit).map(toMemoryItem)
+    const cached = await local.list()
+    const scoped = spaceId
+      ? cached.filter((save) => (save as Save & { spaceId?: string | null }).spaceId === spaceId)
+      : cached
+    return scoped.slice(0, limit).map(toMemoryItem)
   }
 
   try {
-    return (await new ApiSavesRepo(settings, local).list(limit)).map(toMemoryItem)
+    return (await new ApiSavesRepo(settings, local).list(limit, spaceId)).map(toMemoryItem)
   } catch (error) {
     const cached = await local.list()
-    if (cached.length > 0) return cached.slice(0, limit).map(toMemoryItem)
+    if (cached.length > 0) {
+      const scoped = spaceId
+        ? cached.filter((save) => (save as Save & { spaceId?: string | null }).spaceId === spaceId)
+        : cached
+      if (scoped.length > 0) return scoped.slice(0, limit).map(toMemoryItem)
+    }
     throw error
   }
 }

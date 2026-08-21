@@ -78,6 +78,19 @@ export const createSaveLinkSchema = z.object({
   toSaveId: z.string().trim().min(1).max(128),
 })
 
+export const createSpaceSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+})
+
+export const patchSpaceSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    position: z.number().int().min(0).max(10_000).optional(),
+  })
+  .refine((value) => value.name !== undefined || value.position !== undefined, {
+    message: 'At least one field is required.',
+  })
+
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type CreateSaveInput = z.infer<typeof createSaveSchema>

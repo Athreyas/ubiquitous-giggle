@@ -65,6 +65,7 @@ function migrateLegacySettings(legacy: LegacySettings): LibrarySettings {
     apiBaseUrl: legacy.baseUrl?.trim() || DEFAULT_API_BASE_URL,
     token: legacy.apiKey?.trim() || '',
     useDemo: legacy.useDemo ?? true,
+    activeSpaceId: null,
   }
 }
 

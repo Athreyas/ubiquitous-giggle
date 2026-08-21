@@ -52,7 +52,7 @@ export class ApiSavesRepo {
     this.mirror = mirror
   }
 
-  async list(limit = 500): Promise<Save[]> {
+  async list(limit = 500, spaceId?: string | null): Promise<Save[]> {
     const items: Save[] = []
     let cursor: string | undefined
 
@@ -61,13 +61,15 @@ export class ApiSavesRepo {
         limit: Math.min(100, limit - items.length),
         archived: false,
         cursor,
+        spaceId: spaceId ?? undefined,
       })
       items.push(...page.items)
       cursor = page.nextCursor
       if (!cursor || page.items.length === 0) break
     }
 
-    await this.mirror.replace(items)
+    // Only overwrite the full offline mirror when listing all spaces.
+    if (!spaceId) await this.mirror.replace(items)
     return items
   }
 

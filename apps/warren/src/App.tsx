@@ -6,9 +6,11 @@ import { MemoriesView } from './components/MemoriesView'
 import { LibraryView } from './components/LibraryView'
 import { DetailModal } from './components/DetailModal'
 import { SettingsPanel } from './components/SettingsPanel'
+import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
 import { DEMO_ITEMS } from './lib/demoData'
 import { fetchLibrarySaves } from './lib/api'
 import { normalizeBaseUrl } from './lib/api/client'
+import { listSpaces, type Space } from './lib/api/spaces'
 import { ApiSurfacingRepo } from './lib/repos/surfacingRepo'
 import { markDismissed, markOpened, markSurfaced, selectDailyMemories, todayKey } from './lib/selection'
 import { loadSettings, loadSurfacing, saveSettings, saveSurfacing } from './lib/storage'
@@ -18,11 +20,13 @@ export default function App() {
   const [settings, setSettings] = useState<LibrarySettings>(() => loadSettings())
   const [surfacing, setSurfacing] = useState<SurfacingState>(() => loadSurfacing())
   const [library, setLibrary] = useState<MemoryItem[]>([])
+  const [spaces, setSpaces] = useState<Space[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [shuffleSalt, setShuffleSalt] = useState(0)
   const [view, setView] = useState<ViewKey>('memories')
   const [showSettings, setShowSettings] = useState(false)
+  const [showPalette, setShowPalette] = useState(false)
   const [detail, setDetail] = useState<MemoryItem | null>(null)
 
   const canSync = !settings.useDemo && Boolean(settings.token)
@@ -63,6 +67,25 @@ export default function App() {
       })
       .catch(() => {
         // Keep using the local cache if the API is unreachable.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [canSync, settings])
+
+  useEffect(() => {
+    if (!canSync) {
+      setSpaces([])
+      return
+    }
+    let cancelled = false
+    listSpaces(settings)
+      .then((res) => {
+        if (cancelled) return
+        setSpaces(res.items)
+      })
+      .catch(() => {
+        if (!cancelled) setSpaces([])
       })
     return () => {
       cancelled = true
@@ -114,6 +137,18 @@ export default function App() {
     stream.addEventListener('surfacing', refreshSurfacing)
     return () => stream.close()
   }, [canSync, loadLibrary, settings])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const isPalette =
+        (event.key === 'k' || event.key === 'K') && (event.metaKey || event.ctrlKey)
+      if (!isPalette) return
+      event.preventDefault()
+      setShowPalette((open) => !open)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const spotlight = useMemo(
     () => selectDailyMemories(library, surfacing, { count: 2, shuffleSalt }),
@@ -179,6 +214,52 @@ export default function App() {
     setShuffleSalt(0)
   }
 
+  const handleSelectSpace = useCallback(
+    (spaceId: string | null) => {
+      const next = { ...settings, activeSpaceId: spaceId }
+      setSettings(next)
+      saveSettings(next)
+      setShuffleSalt(0)
+    },
+    [settings],
+  )
+
+  const paletteCommands = useMemo<PaletteCommand[]>(
+    () => [
+      {
+        id: 'go-echo',
+        label: "Today's memory (Daily Echo)",
+        run: () => setView('memories'),
+      },
+      {
+        id: 'go-library',
+        label: 'Open library',
+        run: () => setView('library'),
+      },
+      {
+        id: 'shuffle',
+        label: 'Shuffle daily memories',
+        run: () => setShuffleSalt((s) => s + 1),
+      },
+      {
+        id: 'settings',
+        label: 'Open settings',
+        run: () => setShowSettings(true),
+      },
+      {
+        id: 'all-spaces',
+        label: 'Show all spaces',
+        run: () => handleSelectSpace(null),
+      },
+      ...spaces.map((space) => ({
+        id: `space-${space.id}`,
+        label: `Switch to ${space.name}`,
+        run: () => handleSelectSpace(space.id),
+      })),
+    ],
+    [handleSelectSpace, spaces],
+  )
+
   const todayLabel = format(new Date(), 'EEE, MMM d')
 
   return (
@@ -189,12 +270,16 @@ export default function App() {
         onOpenSettings={() => setShowSettings(true)}
         demo={settings.useDemo}
         signedIn={!settings.useDemo && Boolean(settings.token)}
+        spaces={spaces}
+        activeSpaceId={settings.activeSpaceId}
+        onSelectSpace={handleSelectSpace}
+        onOpenCommandPalette={() => setShowPalette(true)}
       />
 
       <main className="main">
         <AnimatePresence mode="wait">
           <motion.div
-            key={view}
+            key={`${view}:${settings.activeSpaceId ?? 'all'}`}
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -245,6 +330,18 @@ export default function App() {
           />
         ) : null}
       </AnimatePresence>
+
+      <CommandPalette
+        open={showPalette}
+        onClose={() => setShowPalette(false)}
+        settings={settings}
+        localItems={library}
+        commands={paletteCommands}
+        onSelectItem={(item) => {
+          openDetail(item)
+          markVisited(item)
+        }}
+      />
     </div>
   )
 }
