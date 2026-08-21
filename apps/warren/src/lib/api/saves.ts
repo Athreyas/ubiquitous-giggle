@@ -33,6 +33,7 @@ export interface NewSave {
   archived?: boolean
   extractedText?: string
   keywords?: string[]
+  spaceId?: string | null
 }
 
 export interface SavePatch {

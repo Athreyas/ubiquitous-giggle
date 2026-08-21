@@ -1,37 +1,40 @@
 import { motion } from 'motion/react'
-import { IconGear, IconLibrary, IconSparkle } from './Icons'
+import { IconGear, IconLibrary, IconPlus, IconSky, IconSparkle } from './Icons'
 import { WarrenMark } from './WarrenMark'
 import type { Space } from '../lib/api/spaces'
 
-export type ViewKey = 'memories' | 'library'
+export type ViewKey = 'memories' | 'library' | 'sky'
 
 interface Props {
   active: ViewKey
   onNavigate: (view: ViewKey) => void
   onOpenSettings: () => void
+  onOpenCommandPalette: () => void
+  onOpenCapture: () => void
   demo: boolean
   signedIn: boolean
   spaces: Space[]
   activeSpaceId: string | null
   onSelectSpace: (spaceId: string | null) => void
-  onOpenCommandPalette: () => void
 }
 
 const ITEMS: { key: ViewKey; label: string; Icon: typeof IconSparkle }[] = [
   { key: 'memories', label: 'Daily Echo', Icon: IconSparkle },
   { key: 'library', label: 'Library', Icon: IconLibrary },
+  { key: 'sky', label: 'Sky', Icon: IconSky },
 ]
 
 export function NavRail({
   active,
   onNavigate,
   onOpenSettings,
+  onOpenCommandPalette,
+  onOpenCapture,
   demo,
   signedIn,
   spaces,
   activeSpaceId,
   onSelectSpace,
-  onOpenCommandPalette,
 }: Props) {
   return (
     <aside className="rail">
@@ -93,7 +96,12 @@ export function NavRail({
       ) : null}
 
       <div className="rail-foot">
-        <button type="button" className="btn btn-ghost" onClick={onOpenCommandPalette}>
+        {!demo && signedIn ? (
+          <button type="button" className="btn btn-ghost" onClick={onOpenCapture}>
+            <IconPlus /> Capture
+          </button>
+        ) : null}
+        <button type="button" className="btn btn-ghost mobile-search-btn" onClick={onOpenCommandPalette}>
           Search ⌘K
         </button>
         <div className="rail-tip">

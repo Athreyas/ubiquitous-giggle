@@ -54,6 +54,11 @@ CORS allows the Warren Vite origins `http://127.0.0.1:5173` and
 - `PUT /api/v1/surfacing`
 - `POST /api/v1/surfacing/events`
 
-OAuth is not configured in MARK-2. Adding OAuth still requires provider client IDs/secrets and
-callback configuration; local email/password sessions and rotating refresh tokens require no
-provider keys.
+OAuth is scaffolded but not fully wired (MARK-2). Routes:
+
+- `GET /api/v1/auth/oauth/:provider/start` (`google` | `apple`) — returns **501** until
+  provider secrets are set (`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` or
+  `APPLE_CLIENT_ID`/`APPLE_CLIENT_SECRET`), then still 501 until the redirect flow lands.
+- `POST /api/v1/auth/oauth/:provider/callback` — stub (501).
+
+Local email/password sessions and rotating refresh tokens require no provider keys.

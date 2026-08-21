@@ -252,6 +252,122 @@ describe('auth', () => {
     expect(body.items[0]?.memberIds.sort()).toEqual([first.id, second.id].sort())
   })
 
+  it('parses NL time filters and structured search chips', async () => {
+    const { body: registered } = await register('search-filters@example.com')
+    const oldSave = await postJson('/api/v1/saves', registered.token, {
+      ...saveInput('Old gardening tips'),
+      createdAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+    const newSave = await postJson('/api/v1/saves', registered.token, {
+      ...saveInput('Fresh gardening tips'),
+      platform: 'article',
+      tags: ['garden'],
+    })
+    expect(oldSave.status).toBe(201)
+    expect(newSave.status).toBe(201)
+
+    const recent = await app.request('/api/v1/search?q=gardening%20last%20week', {
+      headers: authHeaders(registered.token),
+    })
+    expect(recent.status).toBe(200)
+    const recentHits = (await recent.json()) as { items: MemoryItemBody[] }
+    expect(recentHits.items.map((item) => item.title)).toEqual(['Fresh gardening tips'])
+
+    const byPlatform = await app.request('/api/v1/search?q=gardening&platform=article', {
+      headers: authHeaders(registered.token),
+    })
+    const platformHits = (await byPlatform.json()) as { items: MemoryItemBody[] }
+    expect(platformHits.items.length).toBeGreaterThan(0)
+  })
+
+  it('supports constellation rename, member ops, merge, split, and graph', async () => {
+    const { body: registered } = await register('constellation-crud@example.com')
+    const a = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Graph A'))
+    ).json()) as MemoryItemBody
+    const b = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Graph B'))
+    ).json()) as MemoryItemBody
+    const c = (await (
+      await postJson('/api/v1/saves', registered.token, saveInput('Graph C'))
+    ).json()) as MemoryItemBody
+
+    for (const [id, vector] of [
+      [a.id, [1, 0, 0, 0, 0, 0, 0, 0]],
+      [b.id, [0.99, 0.01, 0, 0, 0, 0, 0, 0]],
+      [c.id, [0.98, 0.02, 0, 0, 0, 0, 0, 0]],
+    ] as const) {
+      const put = await app.request(`/api/v1/saves/${id}/embedding`, {
+        method: 'PUT',
+        headers: jsonAuthHeaders(registered.token),
+        body: JSON.stringify({ model: 'test', dims: 8, vector }),
+      })
+      expect(put.status).toBe(200)
+    }
+
+    await app.request('/api/v1/clustering/run', {
+      method: 'POST',
+      headers: authHeaders(registered.token),
+    })
+    const listed = await app.request('/api/v1/constellations', {
+      headers: authHeaders(registered.token),
+    })
+    const items = ((await listed.json()) as { items: Array<{ id: string; memberIds: string[] }> })
+      .items
+    expect(items.length).toBeGreaterThan(0)
+    const constellationId = items[0]!.id
+
+    const renamed = await app.request(`/api/v1/constellations/${constellationId}`, {
+      method: 'PATCH',
+      headers: jsonAuthHeaders(registered.token),
+      body: JSON.stringify({ name: 'Garden orbit', pinned: true }),
+    })
+    expect(renamed.status).toBe(200)
+    await expect(renamed.json()).resolves.toMatchObject({ name: 'Garden orbit', pinned: true })
+
+    const link = await postJson(`/api/v1/saves/${a.id}/links`, registered.token, {
+      toSaveId: b.id,
+    })
+    expect(link.status).toBe(201)
+
+    const graph = await app.request('/api/v1/graph', {
+      headers: authHeaders(registered.token),
+    })
+    expect(graph.status).toBe(200)
+    const payload = (await graph.json()) as {
+      nodes: unknown[]
+      links: unknown[]
+      constellations: unknown[]
+    }
+    expect(payload.nodes.length).toBeGreaterThanOrEqual(3)
+    expect(payload.links.length).toBeGreaterThanOrEqual(1)
+    expect(payload.constellations.length).toBeGreaterThanOrEqual(1)
+
+    const split = await app.request(`/api/v1/constellations/${constellationId}/split`, {
+      method: 'POST',
+      headers: jsonAuthHeaders(registered.token),
+      body: JSON.stringify({ saveIds: [a.id], name: 'Split orbit' }),
+    })
+    expect(split.status).toBe(201)
+    const splitBody = (await split.json()) as {
+      created: { id: string; name: string }
+      source: { id: string }
+    }
+    expect(splitBody.created.name).toBe('Split orbit')
+
+    const merged = await postJson('/api/v1/constellations/merge', registered.token, {
+      fromId: splitBody.created.id,
+      intoId: splitBody.source.id,
+    })
+    expect(merged.status).toBe(200)
+  })
+
+  it('returns 501 for unconfigured OAuth start', async () => {
+    const response = await app.request('/api/v1/auth/oauth/google/start')
+    expect(response.status).toBe(501)
+    await expect(response.json()).resolves.toMatchObject({ provider: 'google' })
+  })
+
   it('rotates a valid session token and invalidates the previous token', async () => {
     const registered = await register('refresh@example.com')
     const refresh = await app.request('/api/v1/auth/refresh', {

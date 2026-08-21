@@ -91,6 +91,29 @@ export const patchSpaceSchema = z
     message: 'At least one field is required.',
   })
 
+export const patchConstellationSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    pinned: z.boolean().optional(),
+  })
+  .refine((value) => value.name !== undefined || value.pinned !== undefined, {
+    message: 'At least one field is required.',
+  })
+
+export const constellationMemberSchema = z.object({
+  saveId: z.string().trim().min(1).max(128),
+})
+
+export const mergeConstellationsSchema = z.object({
+  fromId: z.string().trim().min(1).max(128),
+  intoId: z.string().trim().min(1).max(128),
+})
+
+export const splitConstellationSchema = z.object({
+  saveIds: z.array(z.string().trim().min(1).max(128)).min(1).max(500),
+  name: z.string().trim().min(1).max(120).optional(),
+})
+
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type CreateSaveInput = z.infer<typeof createSaveSchema>

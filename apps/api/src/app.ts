@@ -34,15 +34,20 @@ import {
   createSpaceSchema,
   embeddingUpsertSchema,
   loginSchema,
+  mergeConstellationsSchema,
+  patchConstellationSchema,
   patchSaveSchema,
   patchSpaceSchema,
   registerSchema,
+  splitConstellationSchema,
+  constellationMemberSchema,
   surfacingEventSchema,
   surfacingStateSchema,
   type CreateSaveInput,
   type PatchSaveInput,
   type SurfacingState,
 } from './validation.js'
+import { matchesTimeRange, parseSearchQuery } from './searchQuery.js'
 
 const allowedOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173'])
 const sessionCookieName = 'warren_session'
@@ -381,22 +386,70 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
 
   app.get('/api/v1/search', requireAuth, (c) => {
     const user = c.get('user')
-    const q = (c.req.query('q') ?? '').trim().toLowerCase()
+    const rawQ = (c.req.query('q') ?? '').trim()
     const limit = parseLimit(c.req.query('limit'), 20, 50)
     const spaceId = c.req.query('spaceId')
-    if (!q) return c.json({ items: [] })
+    const platformParam = c.req.query('platform')
+    const tagParam = c.req.query('tag')
+    const neverOpenedParam = c.req.query('neverOpened') === 'true'
+    const afterParam = c.req.query('after')
+    const beforeParam = c.req.query('before')
+
+    const parsed = parseSearchQuery(rawQ)
+    if (platformParam) parsed.platform = platformParam.toLowerCase()
+    if (tagParam) parsed.tag = tagParam.toLowerCase()
+    if (neverOpenedParam) parsed.neverOpened = true
+    if (afterParam) parsed.afterIso = new Date(afterParam).toISOString()
+    if (beforeParam) parsed.beforeIso = new Date(beforeParam).toISOString()
+
+    const hasFilters =
+      Boolean(parsed.text) ||
+      Boolean(parsed.platform) ||
+      Boolean(parsed.tag) ||
+      Boolean(parsed.afterIso) ||
+      Boolean(parsed.beforeIso) ||
+      Boolean(parsed.neverOpened) ||
+      Boolean(spaceId)
+    if (!hasFilters) return c.json({ items: [] })
 
     const filters: SQL[] = [eq(saves.userId, user.id), eq(saves.archived, 0)]
     if (spaceId) filters.push(eq(saves.spaceId, spaceId))
+    if (parsed.platform) filters.push(eq(saves.platform, parsed.platform))
 
-    const rows = db
+    let rows = db
       .select()
       .from(saves)
       .where(and(...filters))
       .orderBy(desc(saves.updatedAt))
       .all()
 
-    const queryVector = hashEmbed(q)
+    rows = rows.filter((row) => matchesTimeRange(row.createdAt, parsed.afterIso, parsed.beforeIso))
+
+    if (parsed.tag) {
+      rows = rows.filter((row) =>
+        parseStringArray(row.tagsJson).some((tag) => tag.toLowerCase() === parsed.tag),
+      )
+    }
+
+    if (parsed.neverOpened) {
+      const state = loadSurfacingState(db, user.id)
+      rows = rows.filter((row) => !state.lastOpened[row.id])
+    }
+
+    const needle = parsed.text
+    // Filter-only queries (e.g. "never opened" / platform chip) return recent matches.
+    if (!needle) {
+      return c.json({
+        items: rows.slice(0, limit).map((row) => ({
+          ...toMemoryItem(row),
+          score: 1,
+          keywordScore: 0,
+          semanticScore: 0,
+        })),
+      })
+    }
+
+    const queryVector = hashEmbed(needle)
     const saveIds = new Set(rows.map((row) => row.id))
     const embeddingBySave = new Map(
       db
@@ -414,9 +467,9 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
           .join('\n')
           .toLowerCase()
         let keywordScore = 0
-        if (row.title.toLowerCase().includes(q)) keywordScore += 5
-        if (hay.includes(q)) keywordScore += 2
-        for (const part of q.split(/\s+/).filter(Boolean)) {
+        if (row.title.toLowerCase().includes(needle)) keywordScore += 5
+        if (hay.includes(needle)) keywordScore += 2
+        for (const part of needle.split(/\s+/).filter(Boolean)) {
           if (hay.includes(part)) keywordScore += 1
         }
 
@@ -429,7 +482,6 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
           )
         }
 
-        // Hybrid: keyword dominates exact matches; semantic lifts vague NL queries.
         const score = keywordScore + semanticScore * 4
         return { row, score, keywordScore, semanticScore }
       })
@@ -448,6 +500,54 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
   })
 
   app.get('/api/v1/auth/me', requireAuth, (c) => c.json(c.get('user')))
+
+  // OAuth scaffold (MARK-2): routes exist but return 501 until provider secrets are configured.
+  app.get('/api/v1/auth/oauth/:provider/start', (c) => {
+    const provider = c.req.param('provider').toLowerCase()
+    if (provider !== 'google' && provider !== 'apple') {
+      throw new HTTPException(404, { message: 'Unknown OAuth provider.' })
+    }
+    const configured =
+      provider === 'google'
+        ? Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+        : Boolean(process.env.APPLE_CLIENT_ID && process.env.APPLE_CLIENT_SECRET)
+    if (!configured) {
+      return c.json(
+        {
+          error: 'OAuth not configured.',
+          provider,
+          hint:
+            provider === 'google'
+              ? 'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.'
+              : 'Set APPLE_CLIENT_ID and APPLE_CLIENT_SECRET.',
+        },
+        501,
+      )
+    }
+    return c.json(
+      {
+        error: 'OAuth redirect flow not implemented yet.',
+        provider,
+        status: 'configured_but_pending_implementation',
+      },
+      501,
+    )
+  })
+
+  app.post('/api/v1/auth/oauth/:provider/callback', async (c) => {
+    const provider = c.req.param('provider').toLowerCase()
+    if (provider !== 'google' && provider !== 'apple') {
+      throw new HTTPException(404, { message: 'Unknown OAuth provider.' })
+    }
+    return c.json(
+      {
+        error: 'OAuth callback not implemented yet.',
+        provider,
+        hint: 'Email/password auth remains available via /api/v1/auth/login.',
+      },
+      501,
+    )
+  })
 
   app.get('/api/v1/sync/stream', requireAuth, (c) => {
     const userId = c.get('user').id
@@ -816,6 +916,308 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     return c.json({ items })
   })
 
+  app.patch('/api/v1/constellations/:id', requireAuth, async (c) => {
+    const user = c.get('user')
+    const input = await readJson(c, patchConstellationSchema)
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+
+    db.update(constellations)
+      .set({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.pinned !== undefined ? { pinned: input.pinned ? 1 : 0 } : {}),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(constellations.id, existing.id))
+      .run()
+
+    return c.json(serializeConstellation(db, existing.id))
+  })
+
+  app.delete('/api/v1/constellations/:id', requireAuth, (c) => {
+    const user = c.get('user')
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+    db.transaction((tx) => {
+      tx.delete(constellationMembers).where(eq(constellationMembers.constellationId, existing.id)).run()
+      tx.delete(constellations).where(eq(constellations.id, existing.id)).run()
+    })
+    return c.body(null, 204)
+  })
+
+  app.post('/api/v1/constellations/:id/members', requireAuth, async (c) => {
+    const user = c.get('user')
+    const input = await readJson(c, constellationMemberSchema)
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+    const save = getSaveForUser(db, user.id, input.saveId)
+    if (!save) throw new HTTPException(404, { message: 'Save not found.' })
+
+    const maxPos =
+      db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, existing.id))
+        .orderBy(desc(constellationMembers.position))
+        .get()?.position ?? -1
+
+    try {
+      db.insert(constellationMembers)
+        .values({
+          constellationId: existing.id,
+          saveId: save.id,
+          position: maxPos + 1,
+          createdAt: new Date().toISOString(),
+        })
+        .run()
+    } catch (error) {
+      if (isUniqueConstraint(error)) {
+        throw new HTTPException(409, { message: 'Save already in constellation.' })
+      }
+      throw error
+    }
+
+    db.update(constellations)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(constellations.id, existing.id))
+      .run()
+
+    return c.json(serializeConstellation(db, existing.id), 201)
+  })
+
+  app.delete('/api/v1/constellations/:id/members/:saveId', requireAuth, (c) => {
+    const user = c.get('user')
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+    db.delete(constellationMembers)
+      .where(
+        and(
+          eq(constellationMembers.constellationId, existing.id),
+          eq(constellationMembers.saveId, c.req.param('saveId')),
+        ),
+      )
+      .run()
+    db.update(constellations)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(constellations.id, existing.id))
+      .run()
+    return c.json(serializeConstellation(db, existing.id))
+  })
+
+  app.post('/api/v1/constellations/merge', requireAuth, async (c) => {
+    const user = c.get('user')
+    const input = await readJson(c, mergeConstellationsSchema)
+    if (input.fromId === input.intoId) {
+      throw new HTTPException(400, { message: 'Cannot merge a constellation into itself.' })
+    }
+    const from = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, input.fromId)))
+      .get()
+    const into = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, input.intoId)))
+      .get()
+    if (!from || !into) throw new HTTPException(404, { message: 'Constellation not found.' })
+
+    const fromMembers = db
+      .select()
+      .from(constellationMembers)
+      .where(eq(constellationMembers.constellationId, from.id))
+      .all()
+    const intoMembers = new Set(
+      db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, into.id))
+        .all()
+        .map((row) => row.saveId),
+    )
+    let maxPos =
+      db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, into.id))
+        .orderBy(desc(constellationMembers.position))
+        .get()?.position ?? -1
+
+    db.transaction((tx) => {
+      for (const member of fromMembers) {
+        if (intoMembers.has(member.saveId)) continue
+        maxPos += 1
+        tx.insert(constellationMembers)
+          .values({
+            constellationId: into.id,
+            saveId: member.saveId,
+            position: maxPos,
+            createdAt: new Date().toISOString(),
+          })
+          .run()
+      }
+      tx.delete(constellationMembers).where(eq(constellationMembers.constellationId, from.id)).run()
+      tx.delete(constellations).where(eq(constellations.id, from.id)).run()
+      tx.update(constellations)
+        .set({ updatedAt: new Date().toISOString() })
+        .where(eq(constellations.id, into.id))
+        .run()
+    })
+
+    return c.json(serializeConstellation(db, into.id))
+  })
+
+  app.post('/api/v1/constellations/:id/split', requireAuth, async (c) => {
+    const user = c.get('user')
+    const input = await readJson(c, splitConstellationSchema)
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+
+    const memberSet = new Set(
+      db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, existing.id))
+        .all()
+        .map((row) => row.saveId),
+    )
+    const moveIds = input.saveIds.filter((id) => memberSet.has(id))
+    if (moveIds.length === 0) {
+      throw new HTTPException(400, { message: 'No matching members to split.' })
+    }
+
+    const now = new Date().toISOString()
+    const newId = `csl_${randomUUID()}`
+    db.transaction((tx) => {
+      tx.insert(constellations)
+        .values({
+          id: newId,
+          userId: user.id,
+          spaceId: existing.spaceId,
+          name: input.name ?? `${existing.name} (split)`,
+          pinned: 0,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+      moveIds.forEach((saveId, position) => {
+        tx.delete(constellationMembers)
+          .where(
+            and(
+              eq(constellationMembers.constellationId, existing.id),
+              eq(constellationMembers.saveId, saveId),
+            ),
+          )
+          .run()
+        tx.insert(constellationMembers)
+          .values({
+            constellationId: newId,
+            saveId,
+            position,
+            createdAt: now,
+          })
+          .run()
+      })
+      tx.update(constellations)
+        .set({ updatedAt: now })
+        .where(eq(constellations.id, existing.id))
+        .run()
+    })
+
+    return c.json(
+      {
+        source: serializeConstellation(db, existing.id),
+        created: serializeConstellation(db, newId),
+      },
+      201,
+    )
+  })
+
+  app.get('/api/v1/graph', requireAuth, (c) => {
+    const user = c.get('user')
+    const spaceId = c.req.query('spaceId')
+    const focusId = c.req.query('focus')
+    const filters: SQL[] = [eq(saves.userId, user.id), eq(saves.archived, 0)]
+    if (spaceId) filters.push(eq(saves.spaceId, spaceId))
+
+    const nodes = db
+      .select()
+      .from(saves)
+      .where(and(...filters))
+      .orderBy(desc(saves.updatedAt))
+      .limit(500)
+      .all()
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        platform: row.platform,
+        spaceId: row.spaceId,
+      }))
+    const nodeIds = new Set(nodes.map((node) => node.id))
+
+    const links = db
+      .select()
+      .from(saveLinks)
+      .where(eq(saveLinks.userId, user.id))
+      .all()
+      .filter((row) => nodeIds.has(row.fromSaveId) && nodeIds.has(row.toSaveId))
+      .map((row) => ({
+        id: row.id,
+        source: row.fromSaveId,
+        target: row.toSaveId,
+      }))
+
+    const constellationRows = db
+      .select()
+      .from(constellations)
+      .where(eq(constellations.userId, user.id))
+      .all()
+      .filter((row) => !spaceId || row.spaceId === spaceId)
+      .map((row) => {
+        const members = db
+          .select()
+          .from(constellationMembers)
+          .where(eq(constellationMembers.constellationId, row.id))
+          .all()
+          .map((member) => member.saveId)
+          .filter((id) => nodeIds.has(id))
+        return {
+          id: row.id,
+          name: row.name,
+          pinned: Boolean(row.pinned),
+          memberIds: members,
+        }
+      })
+      .filter((row) => row.memberIds.length > 0)
+
+    return c.json({
+      nodes,
+      links,
+      constellations: constellationRows,
+      focusId: focusId && nodeIds.has(focusId) ? focusId : null,
+    })
+  })
+
   app.get('/api/v1/saves/:id/related', requireAuth, (c) => {
     const user = c.get('user')
     const save = getSaveForUser(db, user.id, c.req.param('id'))
@@ -1168,6 +1570,27 @@ function toMemoryItem(row: Save): MemoryItem {
     ...(row.spaceId ? { spaceId: row.spaceId } : {}),
     ...(row.extractedText ? { extractedText: row.extractedText } : {}),
     ...(row.keywordsJson ? { keywords: parseStringArray(row.keywordsJson) } : {}),
+  }
+}
+
+function serializeConstellation(db: WarrenDatabase, id: string) {
+  const row = db.select().from(constellations).where(eq(constellations.id, id)).get()
+  if (!row) throw new HTTPException(404, { message: 'Constellation not found.' })
+  const members = db
+    .select()
+    .from(constellationMembers)
+    .where(eq(constellationMembers.constellationId, row.id))
+    .orderBy(asc(constellationMembers.position))
+    .all()
+  return {
+    id: row.id,
+    name: row.name,
+    spaceId: row.spaceId,
+    pinned: Boolean(row.pinned),
+    memberIds: members.map((member) => member.saveId),
+    size: members.length,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
   }
 }
 

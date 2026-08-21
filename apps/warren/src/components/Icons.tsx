@@ -14,6 +14,8 @@ export const IconExternal = (p: Props) => <Icon icon="lucide:external-link" {...
 export const IconShuffle = (p: Props) => <Icon icon="lucide:shuffle" {...size} {...p} />
 export const IconArrow = (p: Props) => <Icon icon="lucide:arrow-right" {...size} {...p} />
 export const IconBook = (p: Props) => <Icon icon="lucide:book-open" {...size} {...p} />
+export const IconSky = (p: Props) => <Icon icon="lucide:orbit" {...size} {...p} />
+export const IconPlus = (p: Props) => <Icon icon="lucide:plus" {...size} {...p} />
 
 export const GlyphPlay = (p: Props) => <Icon icon="lucide:play" {...size} {...p} />
 export const GlyphCamera = (p: Props) => <Icon icon="lucide:camera" {...size} {...p} />

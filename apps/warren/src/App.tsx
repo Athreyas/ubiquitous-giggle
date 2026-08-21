@@ -7,6 +7,8 @@ import { LibraryView } from './components/LibraryView'
 import { DetailModal } from './components/DetailModal'
 import { SettingsPanel } from './components/SettingsPanel'
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette'
+import { GraphView } from './components/GraphView'
+import { CaptureSheet } from './components/CaptureSheet'
 import { DEMO_ITEMS } from './lib/demoData'
 import { fetchLibrarySaves } from './lib/api'
 import { normalizeBaseUrl } from './lib/api/client'
@@ -27,7 +29,9 @@ export default function App() {
   const [view, setView] = useState<ViewKey>('memories')
   const [showSettings, setShowSettings] = useState(false)
   const [showPalette, setShowPalette] = useState(false)
+  const [showCapture, setShowCapture] = useState(false)
   const [detail, setDetail] = useState<MemoryItem | null>(null)
+  const [graphFocusId, setGraphFocusId] = useState<string | null>(null)
 
   const canSync = !settings.useDemo && Boolean(settings.token)
 
@@ -241,6 +245,16 @@ export default function App() {
         run: () => setView('library'),
       },
       {
+        id: 'go-sky',
+        label: 'Open sky (graph)',
+        run: () => setView('sky'),
+      },
+      {
+        id: 'capture',
+        label: 'Capture a save',
+        run: () => setShowCapture(true),
+      },
+      {
         id: 'shuffle',
         label: 'Shuffle daily memories',
         run: () => setShuffleSalt((s) => s + 1),
@@ -264,6 +278,11 @@ export default function App() {
     [handleSelectSpace, spaces],
   )
 
+  const showInGraph = useCallback((item: MemoryItem) => {
+    setGraphFocusId(item.id)
+    setView('sky')
+  }, [])
+
   const todayLabel = format(new Date(), 'EEE, MMM d')
 
   return (
@@ -278,12 +297,13 @@ export default function App() {
         activeSpaceId={settings.activeSpaceId}
         onSelectSpace={handleSelectSpace}
         onOpenCommandPalette={() => setShowPalette(true)}
+        onOpenCapture={() => setShowCapture(true)}
       />
 
       <main className="main">
         <AnimatePresence mode="wait">
           <motion.div
-            key={`${view}:${settings.activeSpaceId ?? 'all'}`}
+            key={`${view}:${settings.activeSpaceId ?? 'all'}:${graphFocusId ?? ''}`}
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -301,12 +321,20 @@ export default function App() {
                 onDismiss={handleDismiss}
                 onShuffle={() => setShuffleSalt((s) => s + 1)}
               />
-            ) : (
+            ) : view === 'library' ? (
               <LibraryView
                 items={library}
                 loading={loading}
                 error={error}
                 onOpen={openDetail}
+              />
+            ) : (
+              <GraphView
+                settings={settings}
+                library={library}
+                focusId={graphFocusId}
+                onOpenSave={openDetail}
+                onClearFocus={() => setGraphFocusId(null)}
               />
             )}
           </motion.div>
@@ -340,16 +368,34 @@ export default function App() {
         ) : null}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {showCapture ? (
+          <CaptureSheet
+            key="capture"
+            settings={settings}
+            spaces={spaces}
+            onClose={() => setShowCapture(false)}
+            onSaved={(next) => {
+              setSettings(next)
+              saveSettings(next)
+              void loadLibrary()
+            }}
+          />
+        ) : null}
+      </AnimatePresence>
+
       <CommandPalette
         open={showPalette}
         onClose={() => setShowPalette(false)}
         settings={settings}
         localItems={library}
+        surfacing={surfacing}
         commands={paletteCommands}
         onSelectItem={(item) => {
           openDetail(item)
           markVisited(item)
         }}
+        onShowInGraph={showInGraph}
       />
     </div>
   )
