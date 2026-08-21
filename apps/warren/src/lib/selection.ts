@@ -46,12 +46,16 @@ function wasSurfacedRecently(
   return differenceInCalendarDays(today, parseISO(last)) < withinDays
 }
 
-/** Dismiss = "not today" only (MARK-9). Never a permanent ban. */
+/**
+ * Dismiss = "not today" only (MARK-9). Never a permanent ban.
+ *
+ * `state.dismissed` is a legacy pre-MARK-9 forever-list kept only for wire-shape
+ * compatibility with older clients/API payloads — it is never consulted here, so
+ * an item dismissed months ago is fully eligible again once its cooldown lapses.
+ */
 function isDismissedToday(id: string, state: SurfacingState, today: Date): boolean {
   const day = todayKey(today)
-  return (state.byDay[day] ?? []).includes(`dismiss:${id}`) ||
-    // Legacy forever-list: treat as dismissed only if also surfaced today, else ignore permanent ban
-    (state.dismissed.includes(id) && (state.byDay[day] ?? []).includes(id))
+  return (state.byDay[day] ?? []).includes(`dismiss:${id}`)
 }
 
 function buildPool(
