@@ -435,9 +435,25 @@ describe('sync stream', () => {
 
       const create = await postJson('/api/v1/saves', registered.body.token, saveInput('Streamed'))
       expect(create.status).toBe(201)
+      const created = (await create.json()) as MemoryItemBody
       await expect(readStreamChunk(reader)).resolves.toMatch(
         /^event: saves\ndata: \{"updatedAt":"[^"]+"\}\n\n$/,
       )
+
+      const update = await app.request(`/api/v1/saves/${created.id}`, {
+        method: 'PATCH',
+        headers: jsonAuthHeaders(registered.body.token),
+        body: JSON.stringify({ title: 'Streamed update' }),
+      })
+      expect(update.status).toBe(200)
+      await expect(readStreamChunk(reader)).resolves.toMatch(/^event: saves\ndata: /)
+
+      const remove = await app.request(`/api/v1/saves/${created.id}`, {
+        method: 'DELETE',
+        headers: authHeaders(registered.body.token),
+      })
+      expect(remove.status).toBe(204)
+      await expect(readStreamChunk(reader)).resolves.toMatch(/^event: saves\ndata: /)
 
       const put = await app.request('/api/v1/surfacing', {
         method: 'PUT',
@@ -456,6 +472,19 @@ describe('sync stream', () => {
     } finally {
       await reader.cancel()
     }
+  })
+
+  it('accepts session-cookie authentication', async () => {
+    const registered = await register('cookie-stream@example.com')
+    const response = await app.request('/api/v1/sync/stream', {
+      headers: { cookie: cookieHeader(registered.response.headers.get('set-cookie')) },
+    })
+    expect(response.status).toBe(200)
+    const reader = response.body?.getReader()
+    expect(reader).toBeTruthy()
+    if (!reader) return
+    await expect(readStreamChunk(reader)).resolves.toBe(': connected\n\n')
+    await reader.cancel()
   })
 
   it('requires authentication', async () => {
