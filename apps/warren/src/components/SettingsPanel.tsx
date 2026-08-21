@@ -30,7 +30,13 @@ export function SettingsPanel({ settings, onClose, onSave }: Props) {
       return
     }
     let cancelled = false
-    me({ apiBaseUrl: draft.apiBaseUrl, token: draft.token, useDemo: draft.useDemo })
+    me({
+      apiBaseUrl: draft.apiBaseUrl,
+      token: draft.token,
+      useDemo: draft.useDemo,
+      activeSpaceId: draft.activeSpaceId,
+      lastUsedSpaceId: draft.lastUsedSpaceId,
+    })
       .then((user) => {
         if (!cancelled) setProfile(user)
       })
@@ -40,7 +46,7 @@ export function SettingsPanel({ settings, onClose, onSave }: Props) {
     return () => {
       cancelled = true
     }
-  }, [draft.useDemo, draft.token, draft.apiBaseUrl])
+  }, [draft.useDemo, draft.token, draft.apiBaseUrl, draft.activeSpaceId, draft.lastUsedSpaceId])
 
   const switchMode = (next: AuthMode) => {
     setMode(next)

@@ -650,6 +650,25 @@ a {
   .main {
     padding: 24px 18px 48px;
   }
+
+  /* Mobile search: full-width palette, sticky Search affordance (MARK-4). */
+  .mobile-search-btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .palette-sheet {
+    width: 100% !important;
+    max-width: 100%;
+    margin: 0;
+    border-radius: 16px 16px 0 0;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 85vh;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

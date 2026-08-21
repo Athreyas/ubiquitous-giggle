@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-import { and, desc, eq, lt, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, lt, ne, type SQL } from 'drizzle-orm'
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { createMiddleware } from 'hono/factory'
@@ -10,10 +10,13 @@ import { HTTPException } from 'hono/http-exception'
 import type { z } from 'zod'
 
 import { createToken, hashPassword, hashToken, tokenExpiry, verifyPassword } from './auth.js'
-import { createDatabase, type DatabaseClient } from './db.js'
+import { createDatabase, type DatabaseClient, type WarrenDatabase } from './db.js'
 import {
+  constellationMembers,
+  constellations,
   embeddings,
   enrichmentJobs,
+  saveLinks,
   saves,
   spaces,
   surfacingState,
@@ -21,21 +24,30 @@ import {
   users,
   type EnrichmentJob,
   type Save,
+  type SaveLink,
   type User,
 } from './schema.js'
 import {
   batchSavesSchema,
+  createSaveLinkSchema,
   createSaveSchema,
+  createSpaceSchema,
   embeddingUpsertSchema,
   loginSchema,
+  mergeConstellationsSchema,
+  patchConstellationSchema,
   patchSaveSchema,
+  patchSpaceSchema,
   registerSchema,
+  splitConstellationSchema,
+  constellationMemberSchema,
   surfacingEventSchema,
   surfacingStateSchema,
   type CreateSaveInput,
   type PatchSaveInput,
   type SurfacingState,
 } from './validation.js'
+import { matchesTimeRange, parseSearchQuery } from './searchQuery.js'
 
 const allowedOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173'])
 const sessionCookieName = 'warren_session'
@@ -45,6 +57,8 @@ const defaultSpaces = [
   { name: 'Work', slug: 'work', position: 1 },
   { name: 'Learning', slug: 'learning', position: 2 },
 ] as const
+const syncClients = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>()
+const sseEncoder = new TextEncoder()
 
 const defaultSurfacingState = (): SurfacingState => ({
   byDay: {},
@@ -71,6 +85,7 @@ interface MemoryItem {
   platform: 'youtube' | 'instagram' | 'tiktok' | 'article' | 'note' | 'other'
   createdAt: string
   archived: boolean
+  spaceId?: string
   extractedText?: string
   keywords?: string[]
 }
@@ -249,7 +264,334 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     return c.body(null, 204)
   })
 
+  app.post('/api/v1/auth/refresh', requireAuth, (c) => {
+    const user = c.get('user')
+    const oldTokenHash = c.get('tokenHash')
+    const token = createToken()
+    const now = new Date().toISOString()
+
+    db.transaction((tx) => {
+      tx.delete(tokens).where(eq(tokens.tokenHash, oldTokenHash)).run()
+      tx.insert(tokens)
+        .values({
+          tokenHash: hashToken(token),
+          userId: user.id,
+          expiresAt: tokenExpiry(),
+          createdAt: now,
+        })
+        .run()
+    })
+
+    setSessionCookie(c, token)
+    return c.json({ user, token })
+  })
+
+  app.get('/api/v1/spaces', requireAuth, (c) => {
+    const rows = db
+      .select()
+      .from(spaces)
+      .where(eq(spaces.userId, c.get('user').id))
+      .orderBy(asc(spaces.position))
+      .all()
+    return c.json({
+      items: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        position: row.position,
+        createdAt: row.createdAt,
+      })),
+    })
+  })
+
+  app.post('/api/v1/spaces', requireAuth, async (c) => {
+    const input = await readJson(c, createSpaceSchema)
+    const user = c.get('user')
+    const now = new Date().toISOString()
+    const maxPos =
+      db
+        .select()
+        .from(spaces)
+        .where(eq(spaces.userId, user.id))
+        .orderBy(desc(spaces.position))
+        .get()?.position ?? -1
+    const slug = input.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || `space-${Date.now()}`
+    const row = {
+      id: `spc_${randomUUID()}`,
+      userId: user.id,
+      name: input.name,
+      slug: `${slug}-${randomUUID().slice(0, 6)}`,
+      position: maxPos + 1,
+      createdAt: now,
+    }
+    db.insert(spaces).values(row).run()
+    return c.json(
+      { id: row.id, name: row.name, slug: row.slug, position: row.position, createdAt: row.createdAt },
+      201,
+    )
+  })
+
+  app.patch('/api/v1/spaces/:id', requireAuth, async (c) => {
+    const input = await readJson(c, patchSpaceSchema)
+    const user = c.get('user')
+    const existing = db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.userId, user.id), eq(spaces.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Space not found.' })
+    db.update(spaces)
+      .set({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.position !== undefined ? { position: input.position } : {}),
+      })
+      .where(eq(spaces.id, existing.id))
+      .run()
+    const updated = db.select().from(spaces).where(eq(spaces.id, existing.id)).get()!
+    return c.json({
+      id: updated.id,
+      name: updated.name,
+      slug: updated.slug,
+      position: updated.position,
+      createdAt: updated.createdAt,
+    })
+  })
+
+  app.delete('/api/v1/spaces/:id', requireAuth, (c) => {
+    const user = c.get('user')
+    const existing = db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.userId, user.id), eq(spaces.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Space not found.' })
+    const personal = db
+      .select()
+      .from(spaces)
+      .where(and(eq(spaces.userId, user.id), eq(spaces.slug, 'personal')))
+      .get()
+    db.transaction((tx) => {
+      tx.update(saves)
+        .set({ spaceId: personal?.id ?? null, updatedAt: new Date().toISOString() })
+        .where(and(eq(saves.userId, user.id), eq(saves.spaceId, existing.id)))
+        .run()
+      tx.delete(spaces).where(eq(spaces.id, existing.id)).run()
+    })
+    return c.body(null, 204)
+  })
+
+  app.get('/api/v1/search', requireAuth, (c) => {
+    const user = c.get('user')
+    const rawQ = (c.req.query('q') ?? '').trim()
+    const limit = parseLimit(c.req.query('limit'), 20, 50)
+    const spaceId = c.req.query('spaceId')
+    const platformParam = c.req.query('platform')
+    const tagParam = c.req.query('tag')
+    const neverOpenedParam = c.req.query('neverOpened') === 'true'
+    const afterParam = c.req.query('after')
+    const beforeParam = c.req.query('before')
+
+    const parsed = parseSearchQuery(rawQ)
+    if (platformParam) parsed.platform = platformParam.toLowerCase()
+    if (tagParam) parsed.tag = tagParam.toLowerCase()
+    if (neverOpenedParam) parsed.neverOpened = true
+    if (afterParam) parsed.afterIso = new Date(afterParam).toISOString()
+    if (beforeParam) parsed.beforeIso = new Date(beforeParam).toISOString()
+
+    const hasFilters =
+      Boolean(parsed.text) ||
+      Boolean(parsed.platform) ||
+      Boolean(parsed.tag) ||
+      Boolean(parsed.afterIso) ||
+      Boolean(parsed.beforeIso) ||
+      Boolean(parsed.neverOpened) ||
+      Boolean(spaceId)
+    if (!hasFilters) return c.json({ items: [] })
+
+    const filters: SQL[] = [eq(saves.userId, user.id), eq(saves.archived, 0)]
+    if (spaceId) filters.push(eq(saves.spaceId, spaceId))
+    if (parsed.platform) filters.push(eq(saves.platform, parsed.platform))
+
+    let rows = db
+      .select()
+      .from(saves)
+      .where(and(...filters))
+      .orderBy(desc(saves.updatedAt))
+      .all()
+
+    rows = rows.filter((row) => matchesTimeRange(row.createdAt, parsed.afterIso, parsed.beforeIso))
+
+    if (parsed.tag) {
+      rows = rows.filter((row) =>
+        parseStringArray(row.tagsJson).some((tag) => tag.toLowerCase() === parsed.tag),
+      )
+    }
+
+    if (parsed.neverOpened) {
+      const state = loadSurfacingState(db, user.id)
+      rows = rows.filter((row) => !state.lastOpened[row.id])
+    }
+
+    const needle = parsed.text
+    // Filter-only queries (e.g. "never opened" / platform chip) return recent matches.
+    if (!needle) {
+      return c.json({
+        items: rows.slice(0, limit).map((row) => ({
+          ...toMemoryItem(row),
+          score: 1,
+          keywordScore: 0,
+          semanticScore: 0,
+        })),
+      })
+    }
+
+    const queryVector = hashEmbed(needle)
+    const saveIds = new Set(rows.map((row) => row.id))
+    const embeddingBySave = new Map(
+      db
+        .select()
+        .from(embeddings)
+        .all()
+        .filter((row) => saveIds.has(row.saveId))
+        .map((row) => [row.saveId, row] as const),
+    )
+
+    const scored = rows
+      .map((row) => {
+        const hay = [row.title, row.summary, row.note, row.url, row.tagsJson, row.extractedText]
+          .filter(Boolean)
+          .join('\n')
+          .toLowerCase()
+        let keywordScore = 0
+        if (row.title.toLowerCase().includes(needle)) keywordScore += 5
+        if (hay.includes(needle)) keywordScore += 2
+        for (const part of needle.split(/\s+/).filter(Boolean)) {
+          if (hay.includes(part)) keywordScore += 1
+        }
+
+        let semanticScore = 0
+        const embedding = embeddingBySave.get(row.id)
+        if (embedding && embedding.dims === queryVector.length) {
+          semanticScore = cosineSimilarity(
+            queryVector,
+            JSON.parse(embedding.vectorJson) as number[],
+          )
+        }
+
+        const score = keywordScore + semanticScore * 4
+        return { row, score, keywordScore, semanticScore }
+      })
+      .filter((entry) => entry.score > 0.15)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+
+    return c.json({
+      items: scored.map((entry) => ({
+        ...toMemoryItem(entry.row),
+        score: entry.score,
+        keywordScore: entry.keywordScore,
+        semanticScore: entry.semanticScore,
+      })),
+    })
+  })
+
   app.get('/api/v1/auth/me', requireAuth, (c) => c.json(c.get('user')))
+
+  // OAuth scaffold (MARK-2): routes exist but return 501 until provider secrets are configured.
+  app.get('/api/v1/auth/oauth/:provider/start', (c) => {
+    const provider = c.req.param('provider').toLowerCase()
+    if (provider !== 'google' && provider !== 'apple') {
+      throw new HTTPException(404, { message: 'Unknown OAuth provider.' })
+    }
+    const configured =
+      provider === 'google'
+        ? Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET)
+        : Boolean(process.env.APPLE_CLIENT_ID && process.env.APPLE_CLIENT_SECRET)
+    if (!configured) {
+      return c.json(
+        {
+          error: 'OAuth not configured.',
+          provider,
+          hint:
+            provider === 'google'
+              ? 'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.'
+              : 'Set APPLE_CLIENT_ID and APPLE_CLIENT_SECRET.',
+        },
+        501,
+      )
+    }
+    return c.json(
+      {
+        error: 'OAuth redirect flow not implemented yet.',
+        provider,
+        status: 'configured_but_pending_implementation',
+      },
+      501,
+    )
+  })
+
+  app.post('/api/v1/auth/oauth/:provider/callback', async (c) => {
+    const provider = c.req.param('provider').toLowerCase()
+    if (provider !== 'google' && provider !== 'apple') {
+      throw new HTTPException(404, { message: 'Unknown OAuth provider.' })
+    }
+    return c.json(
+      {
+        error: 'OAuth callback not implemented yet.',
+        provider,
+        hint: 'Email/password auth remains available via /api/v1/auth/login.',
+      },
+      501,
+    )
+  })
+
+  app.get('/api/v1/sync/stream', requireAuth, (c) => {
+    const userId = c.get('user').id
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+
+    const cleanup = () => {
+      if (heartbeat) clearInterval(heartbeat)
+      if (!controller) return
+      const clients = syncClients.get(userId)
+      clients?.delete(controller)
+      if (clients?.size === 0) syncClients.delete(userId)
+    }
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController
+        let clients = syncClients.get(userId)
+        if (!clients) {
+          clients = new Set()
+          syncClients.set(userId, clients)
+        }
+        clients.add(nextController)
+        nextController.enqueue(sseEncoder.encode(': connected\n\n'))
+        heartbeat = setInterval(() => {
+          try {
+            nextController.enqueue(sseEncoder.encode(': heartbeat\n\n'))
+          } catch {
+            cleanup()
+          }
+        }, 25_000)
+      },
+      cancel: cleanup,
+    })
+
+    return new Response(stream, {
+      headers: {
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'Content-Type': 'text/event-stream',
+        'X-Accel-Buffering': 'no',
+      },
+    })
+  })
 
   app.get('/api/v1/assets/:id', requireAuth, (c) => {
     const row = getSaveForUser(db, c.get('user').id, c.req.param('id'))
@@ -281,10 +623,14 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     const limit = parseLimit(c.req.query('limit'))
     const cursor = c.req.query('cursor')
     const archived = c.req.query('archived') ?? 'false'
+    const spaceId = c.req.query('spaceId')
     const filters: SQL[] = [eq(saves.userId, user.id)]
 
     if (archived !== 'all') {
       filters.push(eq(saves.archived, archived === 'true' ? 1 : 0))
+    }
+    if (spaceId) {
+      filters.push(eq(saves.spaceId, spaceId))
     }
     if (cursor) {
       filters.push(lt(saves.createdAt, cursor))
@@ -305,10 +651,11 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
 
   app.post('/api/v1/saves', requireAuth, async (c) => {
     const input = await readJson(c, createSaveSchema)
-    const row = buildSaveInsert(c.get('user').id, input)
+    const row = buildSaveInsert(db, c.get('user').id, input)
 
     db.insert(saves).values(row).run()
     enqueueEnrichment(row.id)
+    publishSyncEvent(row.userId, 'saves')
 
     return c.json(toMemoryItem(row), 201)
   })
@@ -327,10 +674,16 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     writeFileSync(assetPath, Buffer.from(await file.arrayBuffer()))
 
     const note = firstString(body.note)
+    const personalSpaceId =
+      db
+        .select()
+        .from(spaces)
+        .where(and(eq(spaces.userId, user.id), eq(spaces.slug, 'personal')))
+        .get()?.id ?? null
     const row: Save = {
       id,
       userId: user.id,
-      spaceId: null,
+      spaceId: personalSpaceId,
       type: 'asset',
       title: firstString(body.title) ?? file.name ?? 'Uploaded asset',
       url: `/api/v1/assets/${id}`,
@@ -348,6 +701,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
 
     db.insert(saves).values(row).run()
     enqueueEnrichment(row.id)
+    publishSyncEvent(row.userId, 'saves')
 
     return c.json(toMemoryItem(row), 201)
   })
@@ -375,7 +729,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
             .run()
           updated += 1
         } else {
-          tx.insert(saves).values(buildSaveInsert(user.id, { ...item, id })).run()
+          tx.insert(saves).values(buildSaveInsert(tx, user.id, { ...item, id })).run()
           created += 1
         }
         ids.push(id)
@@ -386,6 +740,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     for (const id of result.ids) {
       enqueueEnrichment(id)
     }
+    publishSyncEvent(user.id, 'saves')
 
     return c.json(result)
   })
@@ -410,6 +765,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
       .set(buildSaveUpdate(input, new Date().toISOString(), existing.createdAt))
       .where(and(eq(saves.userId, user.id), eq(saves.id, existing.id)))
       .run()
+    publishSyncEvent(user.id, 'saves')
 
     const updated = getSaveForUser(db, user.id, existing.id)
     return c.json(toMemoryItem(updated ?? existing))
@@ -423,8 +779,56 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     if (result.changes === 0) {
       throw new HTTPException(404, { message: 'Save not found.' })
     }
+    publishSyncEvent(c.get('user').id, 'saves')
 
     return c.body(null, 204)
+  })
+
+  app.post('/api/v1/saves/:id/links', requireAuth, async (c) => {
+    const user = c.get('user')
+    const fromSave = getSaveForUser(db, user.id, c.req.param('id'))
+    if (!fromSave) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+    const input = await readJson(c, createSaveLinkSchema)
+    const toSave = getSaveForUser(db, user.id, input.toSaveId)
+    if (!toSave) {
+      throw new HTTPException(404, { message: 'Linked save not found.' })
+    }
+
+    const link = {
+      id: `lnk_${randomUUID()}`,
+      userId: user.id,
+      fromSaveId: fromSave.id,
+      toSaveId: toSave.id,
+      createdAt: new Date().toISOString(),
+    }
+    try {
+      db.insert(saveLinks).values(link).run()
+    } catch (error) {
+      if (isUniqueConstraint(error)) {
+        throw new HTTPException(409, { message: 'These saves are already linked.' })
+      }
+      throw error
+    }
+
+    return c.json(toSaveLink(link), 201)
+  })
+
+  app.get('/api/v1/saves/:id/links', requireAuth, (c) => {
+    const user = c.get('user')
+    const fromSave = getSaveForUser(db, user.id, c.req.param('id'))
+    if (!fromSave) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+
+    const rows = db
+      .select()
+      .from(saveLinks)
+      .where(and(eq(saveLinks.userId, user.id), eq(saveLinks.fromSaveId, fromSave.id)))
+      .orderBy(desc(saveLinks.createdAt))
+      .all()
+    return c.json({ items: rows.map(toSaveLink) })
   })
 
   app.get('/api/v1/enrichment/:saveId', requireAuth, (c) => {
@@ -477,6 +881,454 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     })
   })
 
+  app.get('/api/v1/constellations', requireAuth, (c) => {
+    const user = c.get('user')
+    const spaceId = c.req.query('spaceId')
+    const filters: SQL[] = [eq(constellations.userId, user.id)]
+    if (spaceId) filters.push(eq(constellations.spaceId, spaceId))
+
+    const rows = db
+      .select()
+      .from(constellations)
+      .where(and(...filters))
+      .orderBy(desc(constellations.updatedAt))
+      .all()
+
+    const items = rows.map((row) => {
+      const members = db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, row.id))
+        .orderBy(asc(constellationMembers.position))
+        .all()
+      return {
+        id: row.id,
+        name: row.name,
+        spaceId: row.spaceId,
+        pinned: Boolean(row.pinned),
+        memberIds: members.map((member) => member.saveId),
+        size: members.length,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      }
+    })
+
+    return c.json({ items })
+  })
+
+  app.patch('/api/v1/constellations/:id', requireAuth, async (c) => {
+    const user = c.get('user')
+    const input = await readJson(c, patchConstellationSchema)
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+
+    db.update(constellations)
+      .set({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.pinned !== undefined ? { pinned: input.pinned ? 1 : 0 } : {}),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(constellations.id, existing.id))
+      .run()
+
+    return c.json(serializeConstellation(db, existing.id))
+  })
+
+  app.delete('/api/v1/constellations/:id', requireAuth, (c) => {
+    const user = c.get('user')
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+    db.transaction((tx) => {
+      tx.delete(constellationMembers).where(eq(constellationMembers.constellationId, existing.id)).run()
+      tx.delete(constellations).where(eq(constellations.id, existing.id)).run()
+    })
+    return c.body(null, 204)
+  })
+
+  app.post('/api/v1/constellations/:id/members', requireAuth, async (c) => {
+    const user = c.get('user')
+    const input = await readJson(c, constellationMemberSchema)
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+    const save = getSaveForUser(db, user.id, input.saveId)
+    if (!save) throw new HTTPException(404, { message: 'Save not found.' })
+
+    const maxPos =
+      db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, existing.id))
+        .orderBy(desc(constellationMembers.position))
+        .get()?.position ?? -1
+
+    try {
+      db.insert(constellationMembers)
+        .values({
+          constellationId: existing.id,
+          saveId: save.id,
+          position: maxPos + 1,
+          createdAt: new Date().toISOString(),
+        })
+        .run()
+    } catch (error) {
+      if (isUniqueConstraint(error)) {
+        throw new HTTPException(409, { message: 'Save already in constellation.' })
+      }
+      throw error
+    }
+
+    db.update(constellations)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(constellations.id, existing.id))
+      .run()
+
+    return c.json(serializeConstellation(db, existing.id), 201)
+  })
+
+  app.delete('/api/v1/constellations/:id/members/:saveId', requireAuth, (c) => {
+    const user = c.get('user')
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+    db.delete(constellationMembers)
+      .where(
+        and(
+          eq(constellationMembers.constellationId, existing.id),
+          eq(constellationMembers.saveId, c.req.param('saveId')),
+        ),
+      )
+      .run()
+    db.update(constellations)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(constellations.id, existing.id))
+      .run()
+    return c.json(serializeConstellation(db, existing.id))
+  })
+
+  app.post('/api/v1/constellations/merge', requireAuth, async (c) => {
+    const user = c.get('user')
+    const input = await readJson(c, mergeConstellationsSchema)
+    if (input.fromId === input.intoId) {
+      throw new HTTPException(400, { message: 'Cannot merge a constellation into itself.' })
+    }
+    const from = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, input.fromId)))
+      .get()
+    const into = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, input.intoId)))
+      .get()
+    if (!from || !into) throw new HTTPException(404, { message: 'Constellation not found.' })
+
+    const fromMembers = db
+      .select()
+      .from(constellationMembers)
+      .where(eq(constellationMembers.constellationId, from.id))
+      .all()
+    const intoMembers = new Set(
+      db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, into.id))
+        .all()
+        .map((row) => row.saveId),
+    )
+    let maxPos =
+      db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, into.id))
+        .orderBy(desc(constellationMembers.position))
+        .get()?.position ?? -1
+
+    db.transaction((tx) => {
+      for (const member of fromMembers) {
+        if (intoMembers.has(member.saveId)) continue
+        maxPos += 1
+        tx.insert(constellationMembers)
+          .values({
+            constellationId: into.id,
+            saveId: member.saveId,
+            position: maxPos,
+            createdAt: new Date().toISOString(),
+          })
+          .run()
+      }
+      tx.delete(constellationMembers).where(eq(constellationMembers.constellationId, from.id)).run()
+      tx.delete(constellations).where(eq(constellations.id, from.id)).run()
+      tx.update(constellations)
+        .set({ updatedAt: new Date().toISOString() })
+        .where(eq(constellations.id, into.id))
+        .run()
+    })
+
+    return c.json(serializeConstellation(db, into.id))
+  })
+
+  app.post('/api/v1/constellations/:id/split', requireAuth, async (c) => {
+    const user = c.get('user')
+    const input = await readJson(c, splitConstellationSchema)
+    const existing = db
+      .select()
+      .from(constellations)
+      .where(and(eq(constellations.userId, user.id), eq(constellations.id, c.req.param('id'))))
+      .get()
+    if (!existing) throw new HTTPException(404, { message: 'Constellation not found.' })
+
+    const memberSet = new Set(
+      db
+        .select()
+        .from(constellationMembers)
+        .where(eq(constellationMembers.constellationId, existing.id))
+        .all()
+        .map((row) => row.saveId),
+    )
+    const moveIds = input.saveIds.filter((id) => memberSet.has(id))
+    if (moveIds.length === 0) {
+      throw new HTTPException(400, { message: 'No matching members to split.' })
+    }
+
+    const now = new Date().toISOString()
+    const newId = `csl_${randomUUID()}`
+    db.transaction((tx) => {
+      tx.insert(constellations)
+        .values({
+          id: newId,
+          userId: user.id,
+          spaceId: existing.spaceId,
+          name: input.name ?? `${existing.name} (split)`,
+          pinned: 0,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+      moveIds.forEach((saveId, position) => {
+        tx.delete(constellationMembers)
+          .where(
+            and(
+              eq(constellationMembers.constellationId, existing.id),
+              eq(constellationMembers.saveId, saveId),
+            ),
+          )
+          .run()
+        tx.insert(constellationMembers)
+          .values({
+            constellationId: newId,
+            saveId,
+            position,
+            createdAt: now,
+          })
+          .run()
+      })
+      tx.update(constellations)
+        .set({ updatedAt: now })
+        .where(eq(constellations.id, existing.id))
+        .run()
+    })
+
+    return c.json(
+      {
+        source: serializeConstellation(db, existing.id),
+        created: serializeConstellation(db, newId),
+      },
+      201,
+    )
+  })
+
+  app.get('/api/v1/graph', requireAuth, (c) => {
+    const user = c.get('user')
+    const spaceId = c.req.query('spaceId')
+    const focusId = c.req.query('focus')
+    const filters: SQL[] = [eq(saves.userId, user.id), eq(saves.archived, 0)]
+    if (spaceId) filters.push(eq(saves.spaceId, spaceId))
+
+    const nodes = db
+      .select()
+      .from(saves)
+      .where(and(...filters))
+      .orderBy(desc(saves.updatedAt))
+      .limit(500)
+      .all()
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        platform: row.platform,
+        spaceId: row.spaceId,
+      }))
+    const nodeIds = new Set(nodes.map((node) => node.id))
+
+    const links = db
+      .select()
+      .from(saveLinks)
+      .where(eq(saveLinks.userId, user.id))
+      .all()
+      .filter((row) => nodeIds.has(row.fromSaveId) && nodeIds.has(row.toSaveId))
+      .map((row) => ({
+        id: row.id,
+        source: row.fromSaveId,
+        target: row.toSaveId,
+      }))
+
+    const constellationRows = db
+      .select()
+      .from(constellations)
+      .where(eq(constellations.userId, user.id))
+      .all()
+      .filter((row) => !spaceId || row.spaceId === spaceId)
+      .map((row) => {
+        const members = db
+          .select()
+          .from(constellationMembers)
+          .where(eq(constellationMembers.constellationId, row.id))
+          .all()
+          .map((member) => member.saveId)
+          .filter((id) => nodeIds.has(id))
+        return {
+          id: row.id,
+          name: row.name,
+          pinned: Boolean(row.pinned),
+          memberIds: members,
+        }
+      })
+      .filter((row) => row.memberIds.length > 0)
+
+    return c.json({
+      nodes,
+      links,
+      constellations: constellationRows,
+      focusId: focusId && nodeIds.has(focusId) ? focusId : null,
+    })
+  })
+
+  app.get('/api/v1/saves/:id/related', requireAuth, (c) => {
+    const user = c.get('user')
+    const save = getSaveForUser(db, user.id, c.req.param('id'))
+    if (!save) {
+      throw new HTTPException(404, { message: 'Save not found.' })
+    }
+
+    const target = db.select().from(embeddings).where(eq(embeddings.saveId, save.id)).get()
+    if (!target) {
+      throw new HTTPException(404, { message: 'Embedding not found for this save.' })
+    }
+
+    const limit = parseLimit(c.req.query('limit'), 5, 20)
+    const targetVector = JSON.parse(target.vectorJson) as number[]
+
+    const others = db
+      .select({ save: saves, embedding: embeddings })
+      .from(embeddings)
+      .innerJoin(saves, eq(embeddings.saveId, saves.id))
+      .where(and(eq(saves.userId, user.id), ne(saves.id, save.id)))
+      .all()
+
+    const ranked = others
+      .filter((row) => row.embedding.dims === target.dims)
+      .map((row) => ({
+        save: row.save,
+        similarity: cosineSimilarity(targetVector, JSON.parse(row.embedding.vectorJson) as number[]),
+      }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit)
+
+    return c.json({
+      items: ranked.map((row) => ({ ...toMemoryItem(row.save), similarity: row.similarity })),
+    })
+  })
+
+  app.post('/api/v1/clustering/run', requireAuth, (c) => {
+    const user = c.get('user')
+    const threshold = 0.82
+    const spaceId = c.req.query('spaceId')
+
+    const filters: SQL[] = [eq(saves.userId, user.id), eq(saves.archived, 0)]
+    if (spaceId) filters.push(eq(saves.spaceId, spaceId))
+
+    const rows = db
+      .select({ save: saves, embedding: embeddings })
+      .from(saves)
+      .innerJoin(embeddings, eq(embeddings.saveId, saves.id))
+      .where(and(...filters))
+      .all()
+
+    // Space-aware: never merge saves across spaces unless the caller asked for one space.
+    const bySpace = new Map<string, typeof rows>()
+    for (const row of rows) {
+      const key = row.save.spaceId ?? '__unsorted__'
+      const bucket = bySpace.get(key) ?? []
+      bucket.push(row)
+      bySpace.set(key, bucket)
+    }
+
+    const clusters = [...bySpace.values()].flatMap((bucket) =>
+      greedyClusterBySimilarity(bucket, threshold),
+    )
+    const now = new Date().toISOString()
+
+    const suggestions = clusters.map((cluster) => ({
+      id: `sug_${randomUUID()}`,
+      name: suggestConstellationName(cluster.map((row) => row.save)),
+      memberIds: cluster.map((row) => row.save.id),
+      size: cluster.length,
+    }))
+
+    // Persist as real constellations when the schema supports it (MARK-3 clustering
+    // stub). If a future migration removes these tables, fall back to suggestions-only.
+    let persisted = false
+    try {
+      for (const [index, cluster] of clusters.entries()) {
+        const constellationId = `csl_${randomUUID()}`
+        db.insert(constellations)
+          .values({
+            id: constellationId,
+            userId: user.id,
+            spaceId: cluster[0]?.save.spaceId ?? null,
+            name: suggestions[index]?.name ?? 'Suggested constellation',
+            pinned: 0,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .run()
+
+        cluster.forEach((row, position) => {
+          db.insert(constellationMembers)
+            .values({
+              constellationId,
+              saveId: row.save.id,
+              position,
+              createdAt: now,
+            })
+            .run()
+        })
+      }
+      persisted = clusters.length > 0
+    } catch {
+      // TODO(MARK-3): constellations tables unavailable on this schema revision —
+      // suggestions are still returned below, just not persisted.
+      persisted = false
+    }
+
+    return c.json({ suggestions, persisted })
+  })
+
   app.get('/api/v1/surfacing', requireAuth, (c) => {
     return c.json(loadSurfacingState(db, c.get('user').id))
   })
@@ -484,6 +1336,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
   app.put('/api/v1/surfacing', requireAuth, async (c) => {
     const state = await readJson(c, surfacingStateSchema)
     saveSurfacingState(db, c.get('user').id, state)
+    publishSyncEvent(c.get('user').id, 'surfacing')
     return c.json(state)
   })
 
@@ -508,6 +1361,7 @@ export function createApp(options: CreateAppOptions = {}): Hono<AppEnv> {
     }
 
     saveSurfacingState(db, c.get('user').id, state)
+    publishSyncEvent(c.get('user').id, 'surfacing')
     return c.json(state)
   })
 
@@ -646,12 +1500,21 @@ function toPublicUser(user: User): PublicUser {
   }
 }
 
-function buildSaveInsert(userId: string, input: CreateSaveInput): Save {
+function buildSaveInsert(db: WarrenDatabase, userId: string, input: CreateSaveInput): Save {
   const now = new Date().toISOString()
+  let spaceId = input.spaceId ?? null
+  if (spaceId === null && input.spaceId === undefined) {
+    spaceId =
+      db
+        .select()
+        .from(spaces)
+        .where(and(eq(spaces.userId, userId), eq(spaces.slug, 'personal')))
+        .get()?.id ?? null
+  }
   return {
     id: input.id ?? mintSaveId(),
     userId,
-    spaceId: input.spaceId ?? null,
+    spaceId,
     type: input.type,
     title: input.title,
     url: input.url ?? null,
@@ -704,9 +1567,57 @@ function toMemoryItem(row: Save): MemoryItem {
     platform: row.platform as MemoryItem['platform'],
     createdAt: row.createdAt,
     archived: Boolean(row.archived),
+    ...(row.spaceId ? { spaceId: row.spaceId } : {}),
     ...(row.extractedText ? { extractedText: row.extractedText } : {}),
     ...(row.keywordsJson ? { keywords: parseStringArray(row.keywordsJson) } : {}),
   }
+}
+
+function serializeConstellation(db: WarrenDatabase, id: string) {
+  const row = db.select().from(constellations).where(eq(constellations.id, id)).get()
+  if (!row) throw new HTTPException(404, { message: 'Constellation not found.' })
+  const members = db
+    .select()
+    .from(constellationMembers)
+    .where(eq(constellationMembers.constellationId, row.id))
+    .orderBy(asc(constellationMembers.position))
+    .all()
+  return {
+    id: row.id,
+    name: row.name,
+    spaceId: row.spaceId,
+    pinned: Boolean(row.pinned),
+    memberIds: members.map((member) => member.saveId),
+    size: members.length,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+function toSaveLink(row: SaveLink) {
+  return {
+    id: row.id,
+    fromSaveId: row.fromSaveId,
+    toSaveId: row.toSaveId,
+    createdAt: row.createdAt,
+  }
+}
+
+function publishSyncEvent(userId: string, event: 'saves' | 'surfacing'): void {
+  const clients = syncClients.get(userId)
+  if (!clients?.size) return
+
+  const payload = sseEncoder.encode(
+    `event: ${event}\ndata: ${JSON.stringify({ updatedAt: new Date().toISOString() })}\n\n`,
+  )
+  for (const controller of clients) {
+    try {
+      controller.enqueue(payload)
+    } catch {
+      clients.delete(controller)
+    }
+  }
+  if (clients.size === 0) syncClients.delete(userId)
 }
 
 function toEnrichmentStatus(job: EnrichmentJob) {
@@ -753,10 +1664,22 @@ async function processPendingEnrichmentJobs(database: DatabaseClient): Promise<v
       }
 
       const result = await enrichSave(save)
+
+      // Local hashed embedding — no cloud LLM (MARK-3 web fallback until CoreML/transformers lands).
+      const vector = hashEmbed(result.extractedText || save.title)
+
       const existingTags = parseStringArray(save.tagsJson)
-      const mergedTags = unique([...existingTags, ...result.keywords])
+      const neighborTags = boostTagsFromNeighbor(db, save.userId, save.id, vector)
+      const mergedTags = clampTagCount(unique([...existingTags, ...result.keywords, ...neighborTags]), save)
+
+      const summary =
+        save.summary.trim().length < SHORT_SUMMARY_MAX_LENGTH && result.extractedText
+          ? extractiveSummary(result.extractedText) || save.summary
+          : save.summary
+
       db.update(saves)
         .set({
+          summary,
           tagsJson: JSON.stringify(mergedTags),
           extractedText: result.extractedText || save.extractedText,
           keywordsJson: JSON.stringify(result.keywords),
@@ -765,8 +1688,6 @@ async function processPendingEnrichmentJobs(database: DatabaseClient): Promise<v
         .where(eq(saves.id, save.id))
         .run()
 
-      // Local hashed embedding — no cloud LLM (MARK-3 web fallback until CoreML/transformers lands).
-      const vector = hashEmbed(result.extractedText || save.title)
       upsertEmbedding(db, save.id, 'warren-hash-v1', vector)
 
       db.update(enrichmentJobs)
@@ -975,12 +1896,12 @@ function saveSurfacingState(db: DatabaseClient['db'], userId: string, state: Sur
     .run()
 }
 
-function parseLimit(raw: string | undefined): number {
-  const parsed = raw ? Number.parseInt(raw, 10) : 50
+function parseLimit(raw: string | undefined, fallback = 50, max = 100): number {
+  const parsed = raw ? Number.parseInt(raw, 10) : fallback
   if (Number.isNaN(parsed)) {
-    return 50
+    return fallback
   }
-  return Math.min(Math.max(parsed, 1), 100)
+  return Math.min(Math.max(parsed, 1), max)
 }
 
 function mintSaveId(): string {
@@ -993,4 +1914,124 @@ function unique(values: string[]): string[] {
 
 function isUniqueConstraint(error: unknown): boolean {
   return error instanceof Error && error.message.includes('UNIQUE constraint failed')
+}
+
+/** Cosine similarity between two equal-length vectors. Returns 0 for zero-norm inputs. */
+function cosineSimilarity(a: number[], b: number[]): number {
+  const length = Math.min(a.length, b.length)
+  let dot = 0
+  let normA = 0
+  let normB = 0
+  for (let i = 0; i < length; i += 1) {
+    dot += a[i] * b[i]
+    normA += a[i] * a[i]
+    normB += b[i] * b[i]
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB)
+  return denom === 0 ? 0 : dot / denom
+}
+
+interface EmbeddedSaveRow {
+  save: Save
+  embedding: { vectorJson: string; dims: number }
+}
+
+/** Greedy single-link clustering: seed a cluster with the first unclustered item and
+ * absorb every remaining item whose similarity to that seed exceeds `threshold`. */
+function greedyClusterBySimilarity(rows: EmbeddedSaveRow[], threshold: number): EmbeddedSaveRow[][] {
+  const vectors = rows.map((row) => JSON.parse(row.embedding.vectorJson) as number[])
+  const used = new Array<boolean>(rows.length).fill(false)
+  const clusters: EmbeddedSaveRow[][] = []
+
+  for (let i = 0; i < rows.length; i += 1) {
+    if (used[i]) continue
+    const cluster = [rows[i]]
+    used[i] = true
+    for (let j = i + 1; j < rows.length; j += 1) {
+      if (used[j] || rows[i].embedding.dims !== rows[j].embedding.dims) continue
+      if (cosineSimilarity(vectors[i], vectors[j]) > threshold) {
+        cluster.push(rows[j])
+        used[j] = true
+      }
+    }
+    if (cluster.length >= 2) clusters.push(cluster)
+  }
+
+  return clusters
+}
+
+function suggestConstellationName(members: Save[]): string {
+  const counts = new Map<string, number>()
+  for (const member of members) {
+    for (const tag of parseStringArray(member.tagsJson)) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+  }
+
+  const [topTag, topCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? []
+  if (topTag && (topCount ?? 0) > 1) {
+    return `Similar: ${topTag}`
+  }
+  return `Similar to "${members[0]?.title ?? 'a save'}"`.slice(0, 120)
+}
+
+/** Nearest-neighbor tag boost: borrow tags from the most similar other save (MARK-3). */
+function boostTagsFromNeighbor(
+  db: DatabaseClient['db'],
+  userId: string,
+  saveId: string,
+  vector: number[],
+): string[] {
+  const rows = db
+    .select({ save: saves, embedding: embeddings })
+    .from(embeddings)
+    .innerJoin(saves, eq(embeddings.saveId, saves.id))
+    .where(and(eq(saves.userId, userId), ne(saves.id, saveId)))
+    .all()
+
+  let best: { save: Save; similarity: number } | undefined
+  for (const row of rows) {
+    if (row.embedding.dims !== vector.length) continue
+    const candidate = JSON.parse(row.embedding.vectorJson) as number[]
+    const similarity = cosineSimilarity(vector, candidate)
+    if (!best || similarity > best.similarity) {
+      best = { save: row.save, similarity }
+    }
+  }
+
+  const NEIGHBOR_TAG_THRESHOLD = 0.5
+  if (!best || best.similarity < NEIGHBOR_TAG_THRESHOLD) return []
+  return parseStringArray(best.save.tagsJson)
+}
+
+const MIN_SAVE_TAGS = 2
+const MAX_SAVE_TAGS = 5
+
+/** Ensure every enriched save keeps 2–5 tags (MARK-3 NN tag suggest, min/max clamp). */
+function clampTagCount(tags: string[], save: Pick<Save, 'platform' | 'type'>): string[] {
+  let result = tags
+  if (result.length < MIN_SAVE_TAGS) {
+    result = unique([...result, save.platform, save.type])
+  }
+  return result.slice(0, MAX_SAVE_TAGS)
+}
+
+const SHORT_SUMMARY_MAX_LENGTH = 20
+
+/** First 1–2 sentences (or ~220 chars) of extracted text — zero cloud LLM (MARK-3). */
+function extractiveSummary(text: string, maxChars = 220): string {
+  const cleaned = text.replace(/\s+/g, ' ').trim()
+  if (!cleaned) return ''
+
+  const sentences = cleaned.match(/[^.!?]+[.!?]+(?:\s+|$)/g) ?? [cleaned]
+  let summary = ''
+  for (const sentence of sentences.slice(0, 2)) {
+    const candidate = `${summary}${sentence}`.trim()
+    if (summary && candidate.length > maxChars) break
+    summary = candidate
+    if (summary.length >= maxChars) break
+  }
+
+  if (!summary) summary = cleaned
+  return summary.length > maxChars ? `${summary.slice(0, maxChars).trim()}…` : summary
 }

@@ -74,6 +74,46 @@ export const embeddingUpsertSchema = z.object({
   vector: z.array(z.number()).min(8).max(4096),
 })
 
+export const createSaveLinkSchema = z.object({
+  toSaveId: z.string().trim().min(1).max(128),
+})
+
+export const createSpaceSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+})
+
+export const patchSpaceSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    position: z.number().int().min(0).max(10_000).optional(),
+  })
+  .refine((value) => value.name !== undefined || value.position !== undefined, {
+    message: 'At least one field is required.',
+  })
+
+export const patchConstellationSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    pinned: z.boolean().optional(),
+  })
+  .refine((value) => value.name !== undefined || value.pinned !== undefined, {
+    message: 'At least one field is required.',
+  })
+
+export const constellationMemberSchema = z.object({
+  saveId: z.string().trim().min(1).max(128),
+})
+
+export const mergeConstellationsSchema = z.object({
+  fromId: z.string().trim().min(1).max(128),
+  intoId: z.string().trim().min(1).max(128),
+})
+
+export const splitConstellationSchema = z.object({
+  saveIds: z.array(z.string().trim().min(1).max(128)).min(1).max(500),
+  name: z.string().trim().min(1).max(120).optional(),
+})
+
 export type RegisterInput = z.infer<typeof registerSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type CreateSaveInput = z.infer<typeof createSaveSchema>

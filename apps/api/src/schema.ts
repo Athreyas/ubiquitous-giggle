@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(),
@@ -49,6 +49,63 @@ export const saves = sqliteTable('saves', {
   keywordsJson: text('keywords_json'),
 })
 
+export const constellations = sqliteTable('constellations', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  spaceId: text('space_id').references(() => spaces.id, { onDelete: 'set null' }),
+  name: text('name').notNull(),
+  pinned: integer('pinned').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+})
+
+export const constellationMembers = sqliteTable(
+  'constellation_members',
+  {
+    constellationId: text('constellation_id')
+      .notNull()
+      .references(() => constellations.id, { onDelete: 'cascade' }),
+    saveId: text('save_id')
+      .notNull()
+      .references(() => saves.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.constellationId, table.saveId] })],
+)
+
+export const shares = sqliteTable('shares', {
+  id: text('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  resourceType: text('resource_type', { enum: ['save', 'constellation'] }).notNull(),
+  resourceId: text('resource_id').notNull(),
+  permission: text('permission', { enum: ['viewer', 'collaborator'] }).notNull(),
+  inviteToken: text('invite_token').notNull().unique(),
+  createdAt: text('created_at').notNull(),
+})
+
+export const saveLinks = sqliteTable(
+  'save_links',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    fromSaveId: text('from_save_id')
+      .notNull()
+      .references(() => saves.id, { onDelete: 'cascade' }),
+    toSaveId: text('to_save_id')
+      .notNull()
+      .references(() => saves.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [uniqueIndex('save_links_from_to_idx').on(table.fromSaveId, table.toSaveId)],
+)
+
 export const embeddings = sqliteTable('embeddings', {
   saveId: text('save_id')
     .primaryKey()
@@ -82,5 +139,9 @@ export const surfacingState = sqliteTable('surfacing_state', {
 export type User = typeof users.$inferSelect
 export type Space = typeof spaces.$inferSelect
 export type Save = typeof saves.$inferSelect
+export type Constellation = typeof constellations.$inferSelect
+export type ConstellationMember = typeof constellationMembers.$inferSelect
+export type Share = typeof shares.$inferSelect
+export type SaveLink = typeof saveLinks.$inferSelect
 export type EnrichmentJob = typeof enrichmentJobs.$inferSelect
 export type SurfacingStateRow = typeof surfacingState.$inferSelect

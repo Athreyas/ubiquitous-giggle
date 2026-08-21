@@ -86,6 +86,55 @@ export function migrateDatabase(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS saves_user_created_idx
       ON saves(user_id, archived, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS constellations (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      space_id text REFERENCES spaces(id) ON DELETE SET NULL,
+      name text NOT NULL,
+      pinned integer NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+      created_at text NOT NULL,
+      updated_at text NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS constellations_user_updated_idx
+      ON constellations(user_id, pinned DESC, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS constellation_members (
+      constellation_id text NOT NULL REFERENCES constellations(id) ON DELETE CASCADE,
+      save_id text NOT NULL REFERENCES saves(id) ON DELETE CASCADE,
+      position integer NOT NULL,
+      created_at text NOT NULL,
+      PRIMARY KEY (constellation_id, save_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS constellation_members_position_idx
+      ON constellation_members(constellation_id, position);
+
+    CREATE TABLE IF NOT EXISTS shares (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      resource_type text NOT NULL CHECK (resource_type IN ('save', 'constellation')),
+      resource_id text NOT NULL,
+      permission text NOT NULL CHECK (permission IN ('viewer', 'collaborator')),
+      invite_token text NOT NULL UNIQUE,
+      created_at text NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS shares_owner_resource_idx
+      ON shares(user_id, resource_type, resource_id);
+
+    CREATE TABLE IF NOT EXISTS save_links (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      from_save_id text NOT NULL REFERENCES saves(id) ON DELETE CASCADE,
+      to_save_id text NOT NULL REFERENCES saves(id) ON DELETE CASCADE,
+      created_at text NOT NULL,
+      UNIQUE (from_save_id, to_save_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS save_links_user_from_idx
+      ON save_links(user_id, from_save_id, created_at);
+
     CREATE TABLE IF NOT EXISTS embeddings (
       save_id text PRIMARY KEY NOT NULL REFERENCES saves(id) ON DELETE CASCADE,
       model text NOT NULL,

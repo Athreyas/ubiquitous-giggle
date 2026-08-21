@@ -7,4 +7,4 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$REPO_ROOT/.cursor/env-common.sh"
 
 cd "$REPO_ROOT/apps/warren"
-exec npm run dev
+exec npm run dev -- --host 127.0.0.1

@@ -16,6 +16,7 @@ export interface Save {
   archived?: boolean
   extractedText?: string
   keywords?: string[]
+  spaceId?: string | null
 }
 
 export interface NewSave {
@@ -32,6 +33,7 @@ export interface NewSave {
   archived?: boolean
   extractedText?: string
   keywords?: string[]
+  spaceId?: string | null
 }
 
 export interface SavePatch {
@@ -52,6 +54,7 @@ export interface ListSavesOptions {
   limit?: number
   cursor?: string | null
   archived?: boolean | 'all'
+  spaceId?: string | null
 }
 
 export interface ListSavesResult {
@@ -66,6 +69,7 @@ export function listSaves(
   const params = new URLSearchParams({ limit: String(options.limit ?? 50) })
   if (options.cursor) params.set('cursor', options.cursor)
   if (options.archived !== undefined) params.set('archived', String(options.archived))
+  if (options.spaceId) params.set('spaceId', options.spaceId)
   return apiFetch<ListSavesResult>(settings, `/api/v1/saves?${params}`)
 }
 

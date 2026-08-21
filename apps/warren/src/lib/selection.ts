@@ -46,16 +46,27 @@ function wasSurfacedRecently(
   return differenceInCalendarDays(today, parseISO(last)) < withinDays
 }
 
+/**
+ * Dismiss = "not today" only (MARK-9). Never a permanent ban.
+ *
+ * `state.dismissed` is a legacy pre-MARK-9 forever-list kept only for wire-shape
+ * compatibility with older clients/API payloads — it is never consulted here, so
+ * an item dismissed months ago is fully eligible again once its cooldown lapses.
+ */
+function isDismissedToday(id: string, state: SurfacingState, today: Date): boolean {
+  const day = todayKey(today)
+  return (state.byDay[day] ?? []).includes(`dismiss:${id}`)
+}
+
 function buildPool(
   items: MemoryItem[],
   state: SurfacingState,
   today: Date,
   minAgeDays: number,
 ): MemoryItem[] {
-  const dismissed = new Set(state.dismissed)
   return items.filter((item) => {
     if (item.archived) return false
-    if (dismissed.has(item.id)) return false
+    if (isDismissedToday(item.id, state, today)) return false
     const age = differenceInCalendarDays(today, parseISO(item.createdAt))
     if (age < minAgeDays) return false
     if (wasSurfacedRecently(item.id, state, today, 14)) return false
@@ -109,7 +120,7 @@ export function selectDailyMemories(
   let pool = buildPool(items, state, now, 7)
   if (pool.length < count) pool = buildPool(items, state, now, 3)
   if (pool.length < count) {
-    pool = items.filter((i) => !i.archived && !state.dismissed.includes(i.id))
+    pool = items.filter((i) => !i.archived && !isDismissedToday(i.id, state, now))
   }
   if (pool.length === 0) return []
 
@@ -167,9 +178,26 @@ export function markOpened(
   }
 }
 
-export function markDismissed(state: SurfacingState, id: string): SurfacingState {
-  if (state.dismissed.includes(id)) return state
-  return { ...state, dismissed: [...state.dismissed, id] }
+/**
+ * Mark as "not today" — does NOT permanently exclude the item (MARK-9 no-decay).
+ * We record a dismiss sentinel in byDay for today; the legacy `dismissed` array
+ * is no longer used as a forever-ban (kept for backward-compatible shape only).
+ */
+export function markDismissed(
+  state: SurfacingState,
+  id: string,
+  now = new Date(),
+): SurfacingState {
+  const day = todayKey(now)
+  const key = `dismiss:${id}`
+  const todayIds = state.byDay[day] ?? []
+  if (todayIds.includes(key)) return state
+  return {
+    ...state,
+    byDay: { ...state.byDay, [day]: [...todayIds, key] },
+    // Clear any legacy forever-ban entry so old state cannot permanently hide items
+    dismissed: state.dismissed.filter((d) => d !== id),
+  }
 }
 
 export function daysSinceSaved(item: MemoryItem, now = new Date()): number {

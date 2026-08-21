@@ -1,18 +1,59 @@
+import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
-import type { MemoryItem } from '../types'
+import type { LibrarySettings, MemoryItem } from '../types'
 import { humanAge } from '../lib/selection'
 import { platformMeta } from '../lib/platform'
 import { PlatformBadge } from './PlatformBadge'
 import { IconClose, IconExternal } from './Icons'
+import { fetchRelatedSaves, type RelatedSave } from '../lib/api/related'
+import { createSaveLink } from '../lib/api/constellations'
 
 interface Props {
   item: MemoryItem
+  settings: LibrarySettings
   onClose: () => void
   onOpen: (item: MemoryItem) => void
+  onOpenRelated: (item: MemoryItem) => void
 }
 
-export function DetailModal({ item, onClose, onOpen }: Props) {
+export function DetailModal({ item, settings, onClose, onOpen, onOpenRelated }: Props) {
   const meta = platformMeta(item.platform)
+  const [related, setRelated] = useState<RelatedSave[]>([])
+  const [linkingId, setLinkingId] = useState<string | null>(null)
+  const [linkedIds, setLinkedIds] = useState<string[]>([])
+  const canFetchRelated = !settings.useDemo && Boolean(settings.token)
+
+  useEffect(() => {
+    if (!canFetchRelated) {
+      setRelated([])
+      return
+    }
+    let cancelled = false
+    fetchRelatedSaves(settings, item.id)
+      .then((res) => {
+        if (!cancelled) setRelated(res.items)
+      })
+      .catch(() => {
+        if (!cancelled) setRelated([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [canFetchRelated, item.id, settings])
+
+  const handleLink = async (target: RelatedSave) => {
+    if (!canFetchRelated || linkingId) return
+    setLinkingId(target.id)
+    try {
+      await createSaveLink(settings, item.id, target.id)
+      setLinkedIds((ids) => [...ids, target.id])
+    } catch {
+      // Duplicate or offline — ignore for now.
+    } finally {
+      setLinkingId(null)
+    }
+  }
+
   return (
     <motion.div
       className="scrim"
@@ -63,6 +104,51 @@ export function DetailModal({ item, onClose, onOpen }: Props) {
               ))}
             </div>
           ) : null}
+
+          {related.length > 0 ? (
+            <div style={{ marginTop: 16 }}>
+              <div className="lbl" style={{ marginBottom: 8 }}>
+                This relates to…
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {related.map((row) => (
+                  <div
+                    key={row.id}
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      border: '1px solid var(--line)',
+                      borderRadius: 12,
+                      padding: '8px 10px',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ justifyContent: 'flex-start', flex: 1 }}
+                      onClick={() => onOpenRelated(row)}
+                    >
+                      {row.title}
+                      <span style={{ opacity: 0.55, marginLeft: 8 }}>
+                        {Math.round(row.similarity * 100)}%
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={linkingId === row.id || linkedIds.includes(row.id)}
+                      onClick={() => void handleLink(row)}
+                    >
+                      {linkedIds.includes(row.id) ? 'Linked' : 'Link'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <div className="detail-actions">
             {item.url ? (
               <a
